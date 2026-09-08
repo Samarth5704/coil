@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, enqueueTurn, tick, directionNames } from '../src/core/game.js';
+import {
+  createGame,
+  enqueueTurn,
+  tick,
+  tailHeldThisTick,
+  directionNames,
+} from '../src/core/game.js';
 
 const WIDTH = 24;
 const HEIGHT = 18;
@@ -131,35 +137,44 @@ describe('the tail-vacate rule', () => {
       snake: coiled, food: at(20, 15),
     });
     expect(state.direction).toBe('up');
-    expect(state.pendingGrowth).toBe(0);
 
-    const moved = tick(enqueueTurn(state, 'right'));
+    const turning = enqueueTurn(state, 'right');
+    expect(tailHeldThisTick(turning)).toBe(false);
+
+    const moved = tick(turning);
     expect(moved.status).toBe('playing');
     expect(head(moved)).toEqual(at(2, 1));
     expect(moved.snake.length).toBe(4);
   });
 
-  it('dies when the head enters the tail cell on a tick where the tail was held by an eat', () => {
-    // One tick earlier, positioned so eating lands the snake in `coiled`.
+  // The spec's wording for this case is "the head entering the tail cell on a
+  // tick where food was eaten dies, because the tail did not move". Under
+  // immediate growth that state cannot be built: the tail is held only on the
+  // tick the head lands on the food, so the head would have to enter the food
+  // cell and the tail cell at once, and food never sits on the snake — it
+  // spawns only into enumerated free cells, the body only occupies cells the
+  // head has already eaten its way through, and createGame rejects crafted
+  // food on the snake. What survives, and what the flood fill actually needs,
+  // is that the tail cell stays occupied on that tick rather than being
+  // vacated under the arriving head.
+  it('holds the tail on the tick food is eaten, leaving its cell occupied instead of vacated', () => {
     const state = createGame({
       width: WIDTH, height: HEIGHT, rng: mulberry32(5),
-      snake: [at(1, 2), at(2, 2), at(2, 1), at(3, 1)], food: at(1, 1),
+      snake: [at(5, 5), at(4, 5), at(3, 5), at(2, 5)], food: at(6, 5),
     });
-    expect(state.direction).toBe('left');
+    const tail = at(2, 5);
+    expect(state.snake[3]).toEqual(tail);
+    expect(tailHeldThisTick(state)).toBe(true);
 
-    const eaten = tick(enqueueTurn(state, 'up'));
+    const eaten = tick(state);
     expect(eaten.foodEaten).toBe(1);
-    expect(eaten.snake).toEqual(coiled);
-    expect(eaten.pendingGrowth).toBe(1);
-
-    // (2,1) is under the snake, so the replacement food cannot sit there.
-    const dead = tick(enqueueTurn(eaten, 'right'));
-    expect(dead.status).toBe('dead');
+    expect(eaten.snake).toContainEqual(tail); // the tail did not move
+    expect(eaten.snake[eaten.snake.length - 1]).toEqual(tail);
   });
 });
 
 describe('growth', () => {
-  it('leaves a snake of length 4 at 4 on the tick it eats and takes it to 5 on the next tick', () => {
+  it('takes a snake of length 4 that eats to length 5 on the tick it eats, not one tick later', () => {
     const state = createGame({
       width: WIDTH, height: HEIGHT, rng: mulberry32(6),
       snake: [at(5, 5), at(4, 5), at(3, 5), at(2, 5)], food: at(6, 5),
@@ -168,10 +183,10 @@ describe('growth', () => {
 
     const eaten = tick(state);
     expect(eaten.foodEaten).toBe(1);
-    expect(eaten.snake.length).toBe(4);
-
-    const grown = tick(eaten);
-    expect(grown.snake.length).toBe(5);
+    expect(eaten.snake.length).toBe(5);
+    expect(head(eaten)).toEqual(at(6, 5));
+    // Every old segment is still there; nothing was popped off the back.
+    expect(eaten.snake.slice(1)).toEqual(state.snake);
   });
 });
 
@@ -250,6 +265,45 @@ describe('a finished game', () => {
     const again = tick(dead);
     expect(again).toBe(dead);
     expect(snapshot(again)).toEqual(snapshot(dead));
+  });
+});
+
+describe('rejecting crafted setups', () => {
+  const build = (overrides) => createGame({
+    width: WIDTH, height: HEIGHT, rng: mulberry32(11), ...overrides,
+  });
+
+  it('refuses an empty snake', () => {
+    expect(() => build({ snake: [] })).toThrow(/snake cannot be empty/);
+  });
+
+  it('refuses a snake of one segment, which has no neck to take a heading from', () => {
+    expect(() => build({ snake: [at(5, 5)] })).toThrow(/at least two segments/);
+  });
+
+  it('refuses a snake that visits the same cell twice', () => {
+    expect(() => build({ snake: [at(5, 5), at(6, 5), at(5, 5)] }))
+      .toThrow(/segment 2 repeats the cell \(5, 5\)/);
+  });
+
+  it('refuses a snake with a segment off the board', () => {
+    expect(() => build({ snake: [at(WIDTH - 1, 5), at(WIDTH, 5)] }))
+      .toThrow(/segment 1 at \(24, 5\) is off a 24 by 18 board/);
+  });
+
+  it('refuses a snake whose consecutive segments are only diagonally adjacent', () => {
+    expect(() => build({ snake: [at(5, 5), at(6, 6)] }))
+      .toThrow(/are not four-way adjacent/);
+  });
+
+  it('refuses food off the board', () => {
+    expect(() => build({ snake: [at(5, 5), at(4, 5)], food: at(WIDTH, 5) }))
+      .toThrow(/food at \(24, 5\) is off a 24 by 18 board/);
+  });
+
+  it('refuses food on a cell the snake occupies', () => {
+    expect(() => build({ snake: [at(5, 5), at(4, 5)], food: at(4, 5) }))
+      .toThrow(/food at \(4, 5\) lands on the snake/);
   });
 });
 

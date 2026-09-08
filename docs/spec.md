@@ -112,11 +112,21 @@ not the current one. The queue is drained one entry per tick.
 ### The tail-vacate rule
 
 The cell the tail currently occupies is legal for the head to enter, because
-the tail leaves it on the same tick — **unless** the snake ate on this tick, in
-which case the tail does not move and the cell kills. Collision detection that
-tests the head against the whole body without this exception produces the most
-complained-about bug in snake clones. The same exception applies inside the
-flood fill: the tail cell counts as reachable except on an eating tick.
+the tail leaves it on the same tick — **unless** the head reaches the food on
+that same tick. Growth is immediate: on an eating tick the tail is not popped,
+the snake is one longer at the end of that tick, and the cell the tail sits in
+stays occupied throughout it. Collision detection that tests the head against
+the whole body without the vacate exception produces the most complained-about
+bug in snake clones. The same exception applies inside the flood fill: the tail
+cell counts as reachable except on a tick that eats.
+
+Because food only ever spawns into an enumerated free cell, and the body only
+ever occupies cells the head has already eaten its way through, food never sits
+on the snake. The head therefore cannot enter the food cell and the tail cell
+on the same tick, and the eating exception governs the flood fill's reachable
+count rather than a death the head can reach. `tailHeldThisTick(state)` is the
+single expression of it, and `tick` calls that same function, so the engine and
+the flood fill cannot drift apart.
 
 ### Food spawning
 
@@ -194,6 +204,34 @@ returns a state with the turn queued. No rendering, no timing, no storage.
 Covers: grid, snake as an array of cells, the turn queue, movement, wall
 collision, self collision, food spawning, growth, and the game-over state.
 
+Three derived helpers are exported alongside them, computed on demand and never
+stored: `pendingDirection(state)` is the heading the next tick will use,
+`nextHead(state)` is the cell the head will occupy after it, and
+`tailHeldThisTick(state)` is true when that move lands on the food and the tail
+is therefore not popped. Phase 2's flood fill reads the last of these for its
+tail-vacate exception, and `tick` calls it too, so there is one definition of
+the rule rather than two.
+
+#### Setup overrides on `createGame`
+
+`createGame` takes two further optional arguments, `snake` and `food`. They
+exist so tests can stand the board up in a position that would take hundreds of
+ticks to play into, or that cannot be played into at all — a board with exactly
+one free cell has no reachable route from a fresh game. Phase 2's
+hand-constructed boards use them. Omit both for a real game.
+
+- `snake` is an array of `{x, y}`, head first. The heading is read from the
+  head and its neck rather than passed separately, so the two cannot disagree.
+  It throws a `RangeError` if it is empty, has fewer than two segments, repeats
+  a cell, places a cell off the board or off the integer grid, or has any two
+  consecutive segments that are not four-way adjacent.
+- `food` is a single `{x, y}`, or `null` for a board holding no food. It throws
+  a `RangeError` if it is off the board or lands on the snake. Omit it entirely
+  and food is spawned through `rng` as normal.
+- The default starting snake is validated on the same path, so a board too
+  small to hold the starting length is rejected rather than quietly producing a
+  snake inside the wall.
+
 **Stop point:** `npm test` passes and the game can be played to completion in a
 test by calling `tick` in a loop. Nothing is visible in a browser.
 
@@ -205,10 +243,12 @@ Tests, each a named case:
 - A turn directly opposite the last queued direction is rejected, not queued.
 - The head entering the cell the tail occupies survives, because the tail
   vacates on the same tick.
-- The head entering the tail cell on a tick where food was eaten dies, because
-  the tail did not move.
-- A snake of length 4 that eats has length 5 on the next tick, not the same
-  tick.
+- The tail cell stays occupied on a tick where food is eaten, rather than being
+  vacated under an arriving head, because the tail did not move. Asserted as
+  the tail not moving rather than as a death: the head cannot both eat and
+  enter the tail cell on one tick, since food never sits on the snake.
+- A snake of length 4 that eats has length 5 on the tick it eats, not one tick
+  later.
 - Food never spawns on a cell occupied by the snake, asserted over 500 seeded
   spawns.
 - With exactly one free cell on the board, food spawns in it deterministically.
@@ -237,7 +277,9 @@ Tests:
 - A snake in the centre of an empty board reaches every free cell.
 - A head sealed into a three-cell pocket by its own body returns exactly 3.
 - The tail cell is counted as reachable on a normal tick.
-- The tail cell is not counted as reachable on a tick where food was eaten.
+- The tail cell is not counted as reachable on a tick that eats — the tick
+  whose move lands the head on the food, which is the tick the tail is held.
+  Read it from `tailHeldThisTick(state)`; do not restate the rule.
 - A pocket reachable only diagonally is **not** counted; adjacency is four-way.
 - A head against a wall with body on three sides returns 0, and the multiplier
   clamps to 5 rather than dividing by zero or exceeding the band.

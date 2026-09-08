@@ -34,9 +34,15 @@ not the current heading. Otherwise a right-moving snake given Up then Left
 inside one tick reverses into its own neck.
 
 **Tail-vacate.** The head may enter the cell the tail occupies, because the
-tail leaves it on the same tick — unless food was eaten this tick, in which
-case the tail does not move and that cell kills. The same exception applies
-inside the flood fill.
+tail leaves it on the same tick — unless the head reaches the food on that same
+tick. Growth is immediate: on an eating tick the tail is not popped, the snake
+is one longer at the end of that tick, and the cell the tail sits in stays
+occupied throughout it. The same exception applies inside the flood fill, which
+reads it from `tailHeldThisTick(state)` rather than restating the rule.
+
+Food never sits on the snake, so the head cannot enter the food cell and the
+tail cell on one tick. The eating exception therefore governs the flood fill's
+reachable count; it is not a death the head can actually die into.
 
 **Food spawning.** Enumerate free cells and index into that array. Never
 `while (occupied) pickRandom()`; it is unbounded and hangs on a full board.

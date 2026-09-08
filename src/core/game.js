@@ -29,6 +29,11 @@ function sameCell(a, b) {
   return a.x === b.x && a.y === b.y;
 }
 
+function onBoard(c, width, height) {
+  return Number.isInteger(c.x) && Number.isInteger(c.y)
+    && c.x >= 0 && c.y >= 0 && c.x < width && c.y < height;
+}
+
 // The heading a snake must have been travelling on to put `head` in front of
 // `neck`. Lets a caller hand in a board position without also restating the
 // direction, and keeps the two from ever disagreeing.
@@ -48,6 +53,58 @@ function startingSnake(width, height) {
   const body = [];
   for (let i = START_LENGTH - 1; i >= 0; i--) body.push(cell(tailX + i, y));
   return body;
+}
+
+// Every snake is checked, crafted or not, so a board too small for the
+// starting length is rejected here rather than producing a snake in the wall.
+function validateSnake(body, width, height) {
+  if (body.length === 0) {
+    throw new RangeError('a snake cannot be empty');
+  }
+  if (body.length < 2) {
+    throw new RangeError(
+      'a snake needs at least two segments, so its heading can be read from the head and its neck',
+    );
+  }
+
+  const seen = new Set();
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (!onBoard(c, width, height)) {
+      throw new RangeError(
+        `snake segment ${i} at (${c.x}, ${c.y}) is off a ${width} by ${height} board`,
+      );
+    }
+    const at = c.y * width + c.x;
+    if (seen.has(at)) {
+      throw new RangeError(`snake segment ${i} repeats the cell (${c.x}, ${c.y})`);
+    }
+    seen.add(at);
+
+    if (i > 0) {
+      const previous = body[i - 1];
+      const gap = Math.abs(c.x - previous.x) + Math.abs(c.y - previous.y);
+      if (gap !== 1) {
+        throw new RangeError(
+          `snake segments ${i - 1} at (${previous.x}, ${previous.y}) and ${i} at `
+          + `(${c.x}, ${c.y}) are not four-way adjacent`,
+        );
+      }
+    }
+  }
+}
+
+function validateFood(food, body, width, height) {
+  if (!onBoard(food, width, height)) {
+    throw new RangeError(
+      `food at (${food.x}, ${food.y}) is off a ${width} by ${height} board`,
+    );
+  }
+  for (const c of body) {
+    if (sameCell(c, food)) {
+      throw new RangeError(`food at (${food.x}, ${food.y}) lands on the snake`);
+    }
+  }
 }
 
 function freeCells(width, height, snake) {
@@ -80,9 +137,10 @@ function makeState(fields) {
   return Object.freeze(state);
 }
 
-// `snake` and `food` are setup overrides, used by tests to stand the board up
-// in a position that would take hundreds of ticks to reach by playing. Omit
-// both for a real game.
+// `snake` and `food` are setup overrides for tests, which need board positions
+// that would take hundreds of ticks to reach by playing and, in the case of a
+// single free cell, cannot be reached by playing at all. Both are validated on
+// the way in; see docs/spec.md, phase 1. Omit both for a real game.
 export function createGame({ width = 24, height = 18, rng, snake, food } = {}) {
   if (typeof rng !== 'function') {
     throw new TypeError('createGame needs an rng() returning a float in [0, 1)');
@@ -91,30 +149,60 @@ export function createGame({ width = 24, height = 18, rng, snake, food } = {}) {
     throw new RangeError('createGame needs a positive integer width and height');
   }
 
-  const body = snake ? snake.map((c) => cell(c.x, c.y)) : startingSnake(width, height);
-  if (body.length === 0) throw new RangeError('a snake needs at least one segment');
+  const body = snake
+    ? snake.map((c) => cell(c.x, c.y))
+    : startingSnake(width, height);
+  validateSnake(body, width, height);
 
-  const direction = body.length > 1 ? headingFrom(body[0], body[1]) : 'right';
-  if (direction === null) throw new RangeError('the first two snake segments are not adjacent');
-
-  const placed = food === undefined
-    ? spawnFood(width, height, body, rng)
-    : food === null ? null : cell(food.x, food.y);
+  let placed;
+  if (food === undefined) {
+    placed = spawnFood(width, height, body, rng);
+  } else if (food === null) {
+    placed = null;
+  } else {
+    placed = cell(food.x, food.y);
+    validateFood(placed, body, width, height);
+  }
 
   return makeState({
     width,
     height,
     snake: body,
-    direction,
+    // validateSnake has already proved the head and neck are adjacent, so this
+    // cannot come back null.
+    direction: headingFrom(body[0], body[1]),
     turns: [],
     food: placed,
     foodEaten: 0,
-    // Set on the tick that eats; spent on the tick after, which is the tick
-    // the snake actually lengthens on and the tick its tail stays put.
-    pendingGrowth: 0,
     status: placed === null ? 'won' : 'playing',
     rng,
   });
+}
+
+// The heading the next tick will use: the queued turn if one is waiting,
+// otherwise the current one. Derived, never stored.
+export function pendingDirection(state) {
+  return state.turns.length > 0 ? state.turns[0] : state.direction;
+}
+
+// The cell the head will occupy after the next tick. May be off the board;
+// that is the wall death, and the caller checks for it.
+export function nextHead(state) {
+  const step = STEP[pendingDirection(state)];
+  return cell(state.snake[0].x + step.x, state.snake[0].y + step.y);
+}
+
+// True when the tick about to run will land the head on the food. Growth is
+// immediate, so that is exactly the tick on which the tail is not popped, and
+// therefore exactly the tick on which the cell the tail sits in stays occupied
+// instead of being vacated under the arriving head.
+//
+// This is the signal the phase 2 flood fill uses to decide whether the tail
+// cell counts as reachable. tick() calls this same function rather than
+// restating the rule, so the two can never drift apart.
+export function tailHeldThisTick(state) {
+  if (state.status !== 'playing' || state.food === null) return false;
+  return sameCell(nextHead(state), state.food);
 }
 
 export function enqueueTurn(state, direction) {
@@ -137,31 +225,35 @@ export function tick(state) {
   if (state.status !== 'playing') return state;
 
   // One entry drained per tick.
-  const direction = state.turns.length > 0 ? state.turns[0] : state.direction;
+  const direction = pendingDirection(state);
   const turns = state.turns.length > 0 ? state.turns.slice(1) : state.turns;
+  const head = nextHead(state);
 
-  const step = STEP[direction];
-  const head = cell(state.snake[0].x + step.x, state.snake[0].y + step.y);
-
-  if (head.x < 0 || head.y < 0 || head.x >= state.width || head.y >= state.height) {
+  if (!onBoard(head, state.width, state.height)) {
     return makeState({ ...state, direction, turns, status: 'dead' });
   }
 
-  // The tail is held on a tick that follows an eat, so its cell is still
-  // occupied when the head arrives and it kills. On any other tick it vacates
-  // as the head moves and the head may legally take it.
-  const tailHeld = state.pendingGrowth > 0;
+  // Growth is immediate: on the tick the head reaches the food the tail is not
+  // popped, so the snake is one longer at the end of that same tick.
+  const ate = tailHeldThisTick(state);
+
   const last = state.snake.length - 1;
   for (let i = 0; i < state.snake.length; i++) {
-    if (i === last && !tailHeld) continue;
+    // The tail vacates as the head moves, so the head may legally take its
+    // cell — except on an eating tick, when the tail stays put.
+    //
+    // That exception is currently unreachable here: it would need the food and
+    // the tail on the same cell, and food only ever spawns into a free cell.
+    // It stays because it is the rule, because tailHeldThisTick is what the
+    // flood fill reads, and because removing it would make this loop silently
+    // wrong if food placement ever changes.
+    if (i === last && !ate) continue;
     if (sameCell(state.snake[i], head)) {
       return makeState({ ...state, direction, turns, status: 'dead' });
     }
   }
 
-  const body = [head, ...(tailHeld ? state.snake : state.snake.slice(0, last))];
-
-  const ate = state.food !== null && sameCell(head, state.food);
+  const body = [head, ...(ate ? state.snake : state.snake.slice(0, last))];
   const food = ate ? spawnFood(state.width, state.height, body, state.rng) : state.food;
 
   return makeState({
@@ -171,7 +263,6 @@ export function tick(state) {
     turns,
     food,
     foodEaten: state.foodEaten + (ate ? 1 : 0),
-    pendingGrowth: (tailHeld ? state.pendingGrowth - 1 : 0) + (ate ? 1 : 0),
     status: food === null ? 'won' : 'playing',
   });
 }
