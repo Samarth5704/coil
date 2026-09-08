@@ -1,0 +1,15 @@
+{
+  "name": "coil",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Snake that shows you how much room you have left.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "contrast": "node tools/contrast.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
