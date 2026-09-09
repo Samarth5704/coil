@@ -557,7 +557,10 @@ Accessibility, inline:
   setting on reload.
 - No horizontal scroll at 320 px.
 
-**Stop point:** the game is playable and looks right. Stop for a taste review.
+**Stop point:** the game renders, runs on its own from the fixed-timestep
+loop, and dies against a wall. It is **not** playable — input is phase 6, so
+nothing on the board is controllable at the end of this phase. Stop for a
+taste review.
 
 Tests:
 
@@ -579,6 +582,20 @@ dominant-axis rule so a diagonal resolves to one direction rather than none.
 scrolls and pull-to-refresh is not broken elsewhere. An on-screen d-pad with
 44 px minimum targets, each with a contextual accessible name.
 
+#### Removing phase 5's auto-restart
+
+Phase 5 ends a run and starts a new board on its own after `AUTO_RESTART_MS` in
+`src/main.js`. That timer exists only because phase 5 has no input: a run ends
+in about a second and a half and there is no control with which to start
+another, so a page left on a corpse cannot be reviewed.
+
+Phase 6 **removes it**. The constant and the `restartAt` clock in the loop both
+go, and a finished run becomes a real game-over state that persists until the
+player leaves it, with an explicit restart control carrying an accessible name.
+This is required work in this phase, not a later tidy-up: a board that takes
+itself away on a timer takes the game-over summary with it, and that summary is
+where the ramp step is named for a player who could not read the colour.
+
 **Step mode**, a settings toggle: the snake advances one cell per keypress
 instead of on a timer. The game becomes turn-based and fully playable from a
 keyboard with announcements, because there is no clock to lose to. This is
@@ -597,6 +614,9 @@ Tests:
 - Step mode advances exactly one tick per keypress and does not advance on key
   repeat held down.
 - Every d-pad button has a distinct accessible name.
+- A finished run stays finished: no timer replaces the board, and the game-over
+  summary is still in the DOM after phase 5's `AUTO_RESTART_MS` would have
+  elapsed. The restart control, and only the restart control, starts a new one.
 
 ### Phase 7 — Audio
 
