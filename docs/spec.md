@@ -387,7 +387,34 @@ Tests:
 `localStorage` with a version field and `migrate()`.
 
 Persisted: high score, sound on/off, reduced-motion override, step-mode on/off.
-Not persisted: any in-progress game.
+Not persisted: any in-progress game. One key, `coil.save`, unversioned in the
+key itself: the version lives inside the record where `migrate()` can read it,
+because a version in the key orphans the old record at every bump instead of
+upgrading it.
+
+#### `load` returns a flag, not a bare record
+
+`load(storage)` returns `{ record, writable }`. `writable` is false in exactly
+one case: the stored record's version is newer than this build's. The store
+carries that flag for the whole session and writes **nothing at all** while it
+is false — not the high score, not a settings toggle, nothing.
+
+The flag is what actually enforces "never overwritten". Leaving the future
+record alone at load time satisfies the rule only until the first setting the
+player toggles; the very next write clobbers the newer install's data a second
+later. Failing to write is the correct behaviour here, and it is deliberate,
+not an oversight — phase 5 has to say so out loud rather than swallow it.
+
+#### `submitScore` commits directly
+
+`submitScore` builds and commits the next record itself rather than routing
+through the store's generic `set()`. `set()` skips the write when the value is
+unchanged, and that second guard masks the high-score comparison: with the
+comparison mutated from `>` to `>=`, an equal score passes the broken check and
+is then stopped by `set()` anyway, so the "equal score does not write at all"
+case passes on a broken comparison. The comparison has to be the only thing
+standing between an equal score and a write. Do not simplify this back into
+`set()`.
 
 **Stop point:** `npm test` passes. Reload behaviour is asserted in tests
 against a fake storage object; the real `localStorage` is never touched from
@@ -467,6 +494,14 @@ Accessibility, inline:
 - `prefers-reduced-motion` removes the flicker, the ramp cross-fade and the
   death animation. It does not slow or remove the snake. The motion of the
   snake is the information.
+- When the store is in its non-writable state — see phase 3, `load` returns a
+  flag — the UI shows one honest line near the settings saying that
+  preferences will not be saved this session because the saved data comes from
+  a newer version of the game. It does **not** fail silently, and it does
+  **not** offer to overwrite the record. Same treatment as the iOS
+  ringer-switch hint: where something cannot be fixed, say so plainly rather
+  than pretending it is handled or letting the player discover it by losing a
+  setting on reload.
 - No horizontal scroll at 320 px.
 
 **Stop point:** the game is playable and looks right. Stop for a taste review.

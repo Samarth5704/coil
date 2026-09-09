@@ -73,3 +73,42 @@ export function playTicks(state, count) {
   for (let i = 0; i < count; i++) s = tick(enqueueTurn(s, chooseDirection(s)));
   return s;
 }
+
+// A stand-in for localStorage. Phase 3 asserts reload behaviour against this;
+// the real localStorage is never touched from a test, and nothing in src/
+// reaches for it — the storage object is always passed in explicitly.
+//
+// `peek` reads a key without touching the counters, so a test can assert the
+// bytes on disk without changing what it is measuring.
+export function createFakeStorage(seed = {}) {
+  const cells = new Map(Object.entries(seed));
+
+  const storage = {
+    getCalls: 0,
+    setCalls: 0,
+    removeCalls: 0,
+    // Set to an Error to make every setItem throw, the way a quota-exceeded
+    // or private-mode write does.
+    throwOnSet: null,
+
+    getItem(k) {
+      storage.getCalls++;
+      return cells.has(k) ? cells.get(k) : null;
+    },
+    setItem(k, v) {
+      storage.setCalls++;
+      if (storage.throwOnSet) throw storage.throwOnSet;
+      cells.set(k, String(v));
+    },
+    removeItem(k) {
+      storage.removeCalls++;
+      cells.delete(k);
+    },
+
+    peek(k) {
+      return cells.has(k) ? cells.get(k) : null;
+    },
+  };
+
+  return storage;
+}
