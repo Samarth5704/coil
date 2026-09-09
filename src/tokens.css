@@ -1,0 +1,126 @@
+/* Coil — design tokens.
+ *
+ * Every colour in the game is declared here and nowhere else. Phase 4 is a
+ * review checkpoint: this file is read top to bottom before any component is
+ * built on it. `tools/contrast.mjs` parses this file, so a hex changed here
+ * changes the checker's output with no edit to the tool.
+ */
+
+:root {
+  /* --- Background ------------------------------------------------------
+   * The single reference background. Every "meaningful" ratio below is
+   * measured against this value.
+   */
+  --bg: #0a0e0c;
+
+  /* --- Confinement ramp ------------------------------------------------
+   * Five steps, indexed to `rampStepFor(state)` 0..4, which is exactly
+   * `multiplierFor(state) - 1`. Calm at 0, sealed at 4.
+   * All five clear 4.5:1 against --bg; they do NOT clear it against each
+   * other. See the measured facts block at the foot of this file.
+   */
+  --ramp-0-calm: #6fe3a1;
+  --ramp-1-close: #d8e06a;
+  --ramp-2-tight: #f0a83c;
+  --ramp-3-hot: #ff8f4a;
+  --ramp-4-sealed: #ff7361;
+
+  /* Two decisions already settled, so Phase 5 does not re-open them and no
+   * token is added for either:
+   *
+   *   - The snake body draws in the current ramp colour. The head is
+   *     distinguished from the body by SHAPE — an inset notch on the leading
+   *     edge — never by colour. There is no --snake-head token and there
+   *     should not be one.
+   *   - Death reuses --ramp-4-sealed. It is the colour the board is already
+   *     showing at the moment a run ends, and a separate death colour would
+   *     say nothing the sealed step does not. */
+
+  /* --- Meaningful ------------------------------------------------------
+   * Text, and marks that carry information. Each must pass 4.5:1 against
+   * --bg, and tools/contrast.mjs fails the build if one does not.
+   */
+  --food: #e8f2ec;
+  --text-primary: #f2f7f4;
+  --text-muted: #8a9a91;
+
+  /* Walls kill, so a wall is meaningful and clears the threshold like any
+   * other mark: 5.57:1 against --bg, 3.05:1 against --food. Of the candidates
+   * this is the dimmer one, chosen so the boundary reads as boundary rather
+   * than as content — a wall as bright as --food competes with the thing the
+   * player is steering toward. */
+  --wall: #7d8d85;
+
+  /* 10.37:1 against --bg.
+   *
+   * This was #6fe3a1 — the same hex as --ramp-0-calm — so the focus ring
+   * disappeared entirely against a calm-state snake. #7dc4ff fixes that
+   * collision, but it does NOT make the ring safe on its own, and nothing in
+   * this file could:
+   *
+   * WCAG contrast is luminance-only. Every colour bright enough to clear
+   * 4.5:1 against this background sits at 1.0–1.5:1 against every ramp step
+   * — #7dc4ff itself measures 1.18, 1.32, 1.08, 1.21 and 1.42:1 against calm
+   * through sealed. There is no single hex that both clears the threshold on
+   * --bg and separates from the ramp by luminance. #7dc4ff is hue-distinct,
+   * not luminance-distinct, and hue alone is exactly what a colour-blind
+   * player does not receive.
+   *
+   * So Phase 5 draws the focus ring as TWO strokes, a dark inner and a light
+   * outer, so that one edge always separates from whatever the ring lands on.
+   * A single-colour ring is not acceptable. See docs/spec.md phase 5. */
+  --focus: #7dc4ff;
+
+  /* --- Decorative ------------------------------------------------------
+   * Exempt from the 4.5:1 threshold, and excluded from the checker BY NAME
+   * in an explicit list in tools/contrast.mjs — never by a threshold and
+   * never by a naming convention. A token that drops below the line has to
+   * fail rather than be silently reclassified as decoration.
+   */
+
+  /* Decorative: the board grid. 1.18:1 against --bg. It is a faint ruling
+   * that helps the eye read cell boundaries; it carries no state, no value
+   * and no identity, and the board is entirely legible with it invisible. */
+  --lattice: #1a211d;
+
+  /* Decorative: the panel behind the readout. 1.07:1 against --bg. It is a
+   * ground for text, never a foreground; the text drawn on it is
+   * --text-primary and --text-muted, both of which are measured against
+   * --bg, which this sits a hair above. */
+  --surface: #121714;
+}
+
+/* --- Measured facts, and what they force -----------------------------------
+ *
+ * Recomputed by tools/contrast.mjs, not carried over by hand.
+ *
+ * The five ramp steps sit at 1.12:1 to 1.43:1 against each ADJACENT step:
+ *
+ *   calm  vs close   1.12:1
+ *   close vs tight   1.43:1
+ *   tight vs hot     1.12:1
+ *   hot   vs sealed  1.18:1
+ *
+ * --food sits at 1.24:1 to 2.33:1 against the ramp steps:
+ *
+ *   food vs calm     1.39:1
+ *   food vs close    1.24:1
+ *   food vs tight    1.77:1
+ *   food vs hot      1.98:1
+ *   food vs sealed   2.33:1
+ *
+ * Therefore neither of these distinctions can EVER be conveyed by colour
+ * alone:
+ *
+ *   - The ramp step needs its NAME and its NUMBER in text. A player who
+ *     cannot separate 1.12:1 has no ramp at all, and the ramp is how the
+ *     confinement system speaks.
+ *   - Food needs a different SHAPE from the snake. At 1.24:1 against close,
+ *     a food pixel and a body pixel are the same pixel.
+ *
+ * Phase 5 must not attempt to solve either of these with colour. Darkening
+ * a ramp step to widen the gap against its neighbour narrows it against the
+ * next one and costs contrast against --bg; the ramp is a hue sequence, and
+ * a hue sequence at even lightness is the correct shape for it. The answer
+ * is text and geometry, not a different hex.
+ */

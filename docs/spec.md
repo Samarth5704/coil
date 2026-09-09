@@ -459,6 +459,41 @@ previous four-step table did not survive that: it gave tight against sealed as
 between them, but `tools/contrast.mjs` exists precisely because a number
 written by hand drifts from the colour it describes.
 
+The remaining meaningful tokens, on the same background:
+
+| Token            | Hex       | Contrast |
+|------------------|-----------|----------|
+| `--food`         | `#e8f2ec` | 16.97:1  |
+| `--text-primary` | `#f2f7f4` | 17.93:1  |
+| `--text-muted`   | `#8a9a91` | 6.58:1   |
+| `--wall`         | `#7d8d85` | 5.57:1   |
+| `--focus`        | `#7dc4ff` | 10.37:1  |
+
+`--wall` is meaningful, not decorative: walls kill, so the boundary carries
+information and clears the threshold like any other mark. It sits at 3.05:1
+against `--food` — the dimmer of the candidates, chosen so a wall reads as
+boundary rather than as content, since a wall as bright as the food competes
+with the thing the player is steering toward.
+
+#### No single-colour focus ring can be luminance-distinct from the ramp
+
+`--focus` was originally `#6fe3a1`, which is the same hex as `--ramp-0-calm`.
+The focus ring therefore vanished completely against a calm-state snake. It is
+now `#7dc4ff`, which fixes that particular collision — and does not fix the
+general problem, because nothing in a token file can.
+
+WCAG contrast is luminance-only. Every colour bright enough to clear 4.5:1
+against `#0a0e0c` sits at 1.0–1.5:1 against every ramp step. `#7dc4ff`
+measures 1.18, 1.32, 1.08, 1.21 and 1.42:1 against calm through sealed. There
+is no hex that both clears the threshold on the background and separates from
+the ramp by luminance; the ramp occupies the bright end of this background, and
+so must anything legible on it. `#7dc4ff` is hue-distinct, not
+luminance-distinct, and hue alone is exactly what a colour-blind player does
+not receive.
+
+This is a property of the background and the ramp, not a bad colour choice, and
+it is why phase 5 draws the ring as two strokes rather than one.
+
 `tools/contrast.mjs` recomputes every foreground/background pair in the token
 file, prints the actual ratios, and exits non-zero if any pair used for text or
 for a meaningful mark falls below 4.5:1. It runs in CI. Decorative tokens
@@ -481,6 +516,24 @@ Canvas 2D. Integer scaling against `devicePixelRatio`, letterboxed. Head, body,
 food and wall all differ in **shape**, not only in colour. The score, reachable
 count and multiplier render as a readout in the DOM beside the canvas, not as
 canvas text.
+
+The snake's body draws in the current ramp colour, so the body is the
+confinement readout. The **head is distinguished from the body by shape — an
+inset notch on its leading edge — and never by colour.** Tinting the head is
+not an option: the head would either take a ramp colour, which is the body's
+own colour, or a colour outside the ramp, which then has to survive the same
+1.0–1.5:1 problem the focus ring has against every step. Shape has no such
+constraint. Death reuses `--ramp-4-sealed` rather than introducing a colour.
+
+**The focus ring is drawn as two strokes: a dark inner and a light outer.** A
+single-colour ring is **not acceptable**, whatever its ratio against the
+background. Per phase 4, no single hex separates from the ramp by luminance, so
+a one-tone ring is guaranteed to disappear against one ramp step or another
+depending on which colour is chosen. Two strokes of opposing lightness mean one
+edge always separates from whatever the ring lands on — the snake at any ramp
+step, the food, a wall, or the bare background. This is the same reasoning as
+the ramp needing its name in text: where colour cannot carry a distinction, the
+distinction is carried by something that is not colour.
 
 Accessibility, inline:
 

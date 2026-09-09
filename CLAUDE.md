@@ -66,6 +66,16 @@ switch may be silencing the game rather than pretending it is handled.
 **Persistence.** Versioned from the first write, with `migrate()`. Loading
 validates and falls back to defaults. An unknown future version is left
 untouched on disk and the session runs on defaults — it is never overwritten.
+`load(storage)` returns `{ record, writable }`. `writable` is false in exactly
+one case: the stored record's version is newer than this build's. The store
+carries that flag for the whole session and writes **nothing at all** while it
+is false — not the high score, not a settings toggle, nothing. Leaving the
+future record alone at load time only satisfies "never overwritten" until the
+first toggle the player flips, so the flag, not the load, is what enforces it.
+Phase 5 must show one honest line saying preferences will not be saved this
+session because the saved data comes from a newer version — it does not fail
+silently and it does not offer to overwrite. See `docs/spec.md` phase 3,
+"`load` returns a flag, not a bare record".
 
 **One store owns all state and persistence.** Views subscribe. Derived values —
 reachable space, multiplier, ramp step, length, tick interval — are computed,
@@ -114,6 +124,9 @@ here from scratch; the spec is cited in the README.
   implementation for anything with logic in it.
 - One phase per session. Commit and push at the end of each. Do not begin the
   next phase in the same session.
+- Commits go straight to `main` through phase 7. From phase 8, when CI exists,
+  work goes on a feature branch and merges via a PR with a **merge commit** —
+  never a squash. The phase history is the point.
 - If a decision changes the design, update `docs/spec.md` and this file in the
   same commit, so the next session does not read a contradiction.
 - If something could not be verified, say so plainly. Do not write "handled",
