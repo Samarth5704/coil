@@ -3,7 +3,7 @@ import {
   createGame,
   enqueueTurn,
   tick,
-  tailHeldThisTick,
+  tailHeldOnNextMove,
   directionNames,
 } from '../src/core/game.js';
 
@@ -139,7 +139,7 @@ describe('the tail-vacate rule', () => {
     expect(state.direction).toBe('up');
 
     const turning = enqueueTurn(state, 'right');
-    expect(tailHeldThisTick(turning)).toBe(false);
+    expect(tailHeldOnNextMove(turning)).toBe(false);
 
     const moved = tick(turning);
     expect(moved.status).toBe('playing');
@@ -164,12 +164,38 @@ describe('the tail-vacate rule', () => {
     });
     const tail = at(2, 5);
     expect(state.snake[3]).toEqual(tail);
-    expect(tailHeldThisTick(state)).toBe(true);
+    expect(tailHeldOnNextMove(state)).toBe(true);
 
     const eaten = tick(state);
     expect(eaten.foodEaten).toBe(1);
     expect(eaten.snake).toContainEqual(tail); // the tail did not move
     expect(eaten.snake[eaten.snake.length - 1]).toEqual(tail);
+  });
+
+  // The contract phase 2 depends on, read from outside tick() on a settled
+  // post-tick state, which is where the flood fill will run. The state here is
+  // reached by playing rather than crafted, so the predicate is answering
+  // about a move that has genuinely not happened yet.
+  it('reports the tail held on a settled post-tick state whose next move lands on the food', () => {
+    const start = createGame({
+      width: WIDTH, height: HEIGHT, rng: mulberry32(12),
+      snake: [at(4, 5), at(3, 5), at(2, 5), at(1, 5)], food: at(6, 5),
+    });
+    expect(tailHeldOnNextMove(start)).toBe(false); // still two moves away
+
+    const settled = tick(start);
+    expect(settled.foodEaten).toBe(0);
+    expect(head(settled)).toEqual(at(5, 5));
+    expect(tailHeldOnNextMove(settled)).toBe(true);
+
+    const formerTail = settled.snake[settled.snake.length - 1];
+    expect(formerTail).toEqual(at(2, 5));
+
+    const eaten = tick(settled);
+    expect(eaten.foodEaten).toBe(1);
+    expect(eaten.snake).toContainEqual(formerTail);
+    expect(eaten.snake[eaten.snake.length - 1]).toEqual(formerTail);
+    expect(eaten.snake.length).toBe(settled.snake.length + 1);
   });
 });
 

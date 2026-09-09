@@ -192,15 +192,18 @@ export function nextHead(state) {
   return cell(state.snake[0].x + step.x, state.snake[0].y + step.y);
 }
 
-// True when the tick about to run will land the head on the food. Growth is
-// immediate, so that is exactly the tick on which the tail is not popped, and
-// therefore exactly the tick on which the cell the tail sits in stays occupied
-// instead of being vacated under the arriving head.
+// True when the move about to happen will land the head on the food. Growth is
+// immediate, so that is exactly the move on which the tail is not popped, and
+// therefore exactly the move through which the cell the tail sits in stays
+// occupied instead of being vacated under the arriving head.
 //
-// This is the signal the phase 2 flood fill uses to decide whether the tail
-// cell counts as reachable. tick() calls this same function rather than
-// restating the rule, so the two can never drift apart.
-export function tailHeldThisTick(state) {
+// The tense matters. Called from a settled state — which is where the phase 2
+// flood fill runs — this asks about the move that has not happened yet, so it
+// is named for the next move rather than for the current tick. Called from
+// inside tick(), the next move is the one being executed, and the answer is
+// the same. tick() calls this function rather than restating the rule, so the
+// engine and the flood fill can never drift apart.
+export function tailHeldOnNextMove(state) {
   if (state.status !== 'playing' || state.food === null) return false;
   return sameCell(nextHead(state), state.food);
 }
@@ -235,18 +238,20 @@ export function tick(state) {
 
   // Growth is immediate: on the tick the head reaches the food the tail is not
   // popped, so the snake is one longer at the end of that same tick.
-  const ate = tailHeldThisTick(state);
+  const ate = tailHeldOnNextMove(state);
 
   const last = state.snake.length - 1;
   for (let i = 0; i < state.snake.length; i++) {
     // The tail vacates as the head moves, so the head may legally take its
-    // cell — except on an eating tick, when the tail stays put.
+    // cell — except on an eating move, when the tail stays put.
     //
-    // That exception is currently unreachable here: it would need the food and
-    // the tail on the same cell, and food only ever spawns into a free cell.
-    // It stays because it is the rule, because tailHeldThisTick is what the
-    // flood fill reads, and because removing it would make this loop silently
-    // wrong if food placement ever changes.
+    // The `!ate` term is dead today, and one invariant is what kills it: food
+    // never spawns on an occupied cell, asserted by the "never places food on
+    // a cell the snake occupies" case over 500 seeded spawns, and enforced for
+    // crafted boards by validateFood. Reaching this branch needs the food and
+    // the tail on one cell, so that case is the test you would have to break
+    // to get here. It stays because it is the rule, and because dropping it
+    // would leave the loop silently wrong the moment food placement changes.
     if (i === last && !ate) continue;
     if (sameCell(state.snake[i], head)) {
       return makeState({ ...state, direction, turns, status: 'dead' });
