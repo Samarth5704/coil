@@ -3,51 +3,41 @@
 // This is the only file in the project that references `window` or
 // `localStorage`. Everything below it takes what it needs as an argument: the
 // core takes an rng, persist takes a storage object, the renderer takes a
-// canvas and a palette, the readout takes a root element. That is what keeps
-// the game testable without a browser, and it only holds if the reaching-out
-// happens in exactly one place. This place.
+// canvas and a palette, the readout takes a root element, the session takes a
+// store. That is what keeps the game testable without a browser, and it only
+// holds if the reaching-out happens in exactly one place. This place.
 //
-// It owns the fixed-timestep loop, and it wires the store to the views.
+// It owns the frame loop, the event listeners, and the wiring between the
+// session and the views.
 //
-// Phase 5 has no input — that is phase 6. The snake therefore holds its
-// heading, runs, and dies against a wall. The loop, the renderer, the readout
-// and the accessibility text are all real; only the steering is missing.
+// Phase 6 gives the board its input: arrows and WASD, a swipe on the play
+// surface, an on-screen d-pad, and step mode for a player who would rather not
+// race a clock. Phase 5's auto-restart constant and its clock are gone from
+// this file — not lengthened, not disabled, deleted. A finished run stays
+// finished until the restart button is pressed, because the game-over summary
+// is where the ramp step is named and a board that takes itself away takes the
+// summary with it.
 
-import { createGame, tick, tickIntervalFor } from './core/game.js';
 import { createStore } from './store.js';
 import { load } from './persist.js';
+import { createSession } from './session.js';
 import { createRenderer, readPalette, drawOptionsFor } from './render/canvas.js';
 import {
   readoutStrings, gameOverSummary, nonWritableHint, createAriaLabeller,
 } from './render/labels.js';
 import { createReadout } from './ui/readout.js';
+import { createGameOver } from './ui/gameover.js';
+import { createDpad } from './ui/dpad.js';
+import { createSettings } from './ui/settings.js';
+import { resolveSwipe } from './input/swipe.js';
 
 const COLS = 24;
 const ROWS = 18;
 
-// The accumulated delta is clamped to this per frame. A backgrounded tab
-// returns with a delta measured in seconds; without the clamp that is three
-// hundred ticks in one frame, and the player comes back to a corpse.
-const MAX_FRAME_MS = 250;
-
-// TEMPORARY, AND SCOPED TO THIS PHASE.
-//
-// How long a finished board stays on screen before the next one starts on its
-// own. It exists for exactly one reason: phase 5 has no input, so a run ends
-// in about a second and a half and there is no control with which to start
-// another. A page frozen on a corpse cannot be looked at, and this phase has
-// to be looked at.
-//
-// PHASE 6 REMOVES IT. When input lands, a finished run becomes a real
-// game-over state that persists until the player leaves it, with an explicit
-// restart control — not a timer that takes the board away while they are
-// still reading the summary. Deleting this constant and the restartAt clock
-// below is part of that phase, not a later tidy-up. See docs/spec.md, phase 6.
-const AUTO_RESTART_MS = 2600;
-
 const canvas = document.getElementById('surface');
 const boardBox = document.getElementById('board');
 const panel = document.querySelector('.panel');
+const dpadBox = document.getElementById('dpad');
 
 // Colours come from the cascade, so src/tokens.css remains the one place a
 // hex is written and tools/contrast.mjs keeps describing what is drawn.
@@ -64,20 +54,69 @@ const store = createStore({ storage: window.localStorage });
 // newer build of the game, and the store then writes NOTHING for the whole
 // session — not the high score, not a setting.
 //
-// Said out loud, once, at start. Not offered as a choice: overwriting a newer
-// install's data is not a thing to offer, and letting the player discover it
-// by losing a setting on reload is not honest.
+// Said out loud, once, at start, next to the settings it applies to. Not
+// offered as a choice: overwriting a newer install's data is not a thing to
+// offer, and letting the player discover it by losing a setting on reload is
+// not honest.
 readout.setHint(nonWritableHint(load(window.localStorage).writable));
+
+createSettings({ root: panel, store });
 
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-let state = createGame({ width: COLS, height: ROWS, rng: () => Math.random() });
 let paused = document.visibilityState === 'hidden';
 let focused = false;
-let accumulator = 0;
 let lastFrame = null;
-let restartAt = null;
-let scoreSubmitted = false;
+
+// The game-over region owns the button and where focus goes; the readout owns
+// the summary node, as it owns every node it writes, and is handed the string
+// through writeSummary. One node, one owner.
+const gameOver = createGameOver({
+  root: panel,
+  writeSummary: readout.setSummary,
+  onRestart: () => {
+    session.restart();
+    // Focus goes back to the thing that is about to move. Left on a button
+    // that has just hidden itself, it would fall to <body>.
+    canvas.focus();
+  },
+});
+
+const session = createSession({
+  width: COLS,
+  height: ROWS,
+  rng: () => Math.random(),
+  store,
+  view: {
+    updated: syncViews,
+    ended: (state, { newHighScore }) => {
+      syncViews();
+      // The summary carries the ramp step BY NAME, and says so in words when
+      // the run was a new best. Neither is information a screen reader ever
+      // had from the colour on the board.
+      gameOver.show(gameOverSummary(state, { newHighScore }));
+    },
+    restarted: () => {
+      gameOver.hide();
+      syncViews();
+    },
+  },
+});
+
+// A pointer steering input — a d-pad press or a swipe. It draws immediately
+// rather than waiting for the next frame, because in step mode there may not
+// be a next frame worth waiting for: the loop still runs, but the board only
+// changes when the player asks it to, and a tap that does not draw reads as a
+// tap that did nothing.
+//
+// Neither path focuses the canvas: a thumb on the d-pad wants the next press
+// to land on the d-pad.
+function steer(direction) {
+  session.steer(direction);
+  render();
+}
+
+createDpad({ document, root: dpadBox, onDirection: steer });
 
 function motionOptions() {
   return drawOptionsFor({
@@ -102,6 +141,7 @@ function resize() {
 // Everything the DOM shows about a board, written together so the canvas and
 // the text can never disagree about which board they are describing.
 function syncViews() {
+  const state = session.state;
   readout.update(readoutStrings(state, { highScore: store.getState().highScore }));
 
   const update = labeller.update(state, { paused });
@@ -112,74 +152,30 @@ function syncViews() {
 }
 
 function render(now = 0) {
-  renderer.draw(state, { ...motionOptions(), focused, now });
+  renderer.draw(session.state, { ...motionOptions(), focused, now });
 }
 
-function advance(now) {
-  const previousStatus = state.status;
-  state = tick(state);
-
-  if (state.status !== previousStatus && state.status !== 'playing') {
-    // A run has ended. The summary carries the ramp step BY NAME, because the
-    // colour it was showing is not information a screen reader ever had.
-    readout.setSummary(gameOverSummary(state));
-    if (!scoreSubmitted) {
-      store.submitScore(state.score);
-      scoreSubmitted = true;
-    }
-    restartAt = now + AUTO_RESTART_MS;
-  }
-}
-
-function restart() {
-  state = createGame({ width: COLS, height: ROWS, rng: () => Math.random() });
-  readout.setSummary('');
-  restartAt = null;
-  scoreSubmitted = false;
-  accumulator = 0;
-}
-
-// The loop. An accumulator with tickIntervalFor(state) as the step — never one
-// tick per animation frame, which runs at double speed on a 120 Hz phone and
-// at whatever speed the monitor happens to be on every other machine.
+// The frame loop. The session owns the accumulator and the fixed timestep; all
+// this does is hand it the wall clock that passed and draw the result. There
+// is no restart clock in here any more, and no branch that replaces a
+// finished board.
 function frame(now) {
   window.requestAnimationFrame(frame);
 
   if (lastFrame === null) lastFrame = now;
-  const delta = Math.min(MAX_FRAME_MS, now - lastFrame);
+  const delta = now - lastFrame;
   lastFrame = now;
 
-  if (paused) {
-    render(now);
-    return;
-  }
+  if (!paused) session.elapse(delta);
 
-  if (restartAt !== null) {
-    if (now >= restartAt) restart();
-    render(now);
-    return;
-  }
-
-  accumulator += delta;
-  // The step is re-read each pass, because the interval shortens as the snake
-  // eats and the loop has to follow it within the same frame.
-  let step = tickIntervalFor(state);
-  while (accumulator >= step && state.status === 'playing') {
-    accumulator -= step;
-    advance(now);
-    step = tickIntervalFor(state);
-  }
-
-  syncViews();
   render(now);
 }
 
 function setPaused(next) {
   if (paused === next) return;
   paused = next;
-  // The accumulator is dropped rather than carried across the pause: time that
-  // passed while the tab was hidden is not time the player was playing.
-  accumulator = 0;
+  // Time that passed while the tab was hidden is not time the player was
+  // playing, so the clock restarts from this frame rather than catching up.
   lastFrame = null;
   syncViews();
 }
@@ -188,8 +184,40 @@ document.addEventListener('visibilitychange', () => {
   setPaused(document.visibilityState === 'hidden');
 });
 
+// One keydown listener, on the document, and the ONLY preventDefault in the
+// project. The session answers three questions before it says yes — is the
+// game running, does the play surface have focus, and is this a game key at
+// all — so Tab is never taken, a key pressed inside the settings panel is
+// never taken, and a key pressed after the run has ended is never taken.
+document.addEventListener('keydown', (event) => {
+  const action = session.applyKey(event, { surfaceFocused: focused });
+  if (action.preventDefault) event.preventDefault();
+});
+
 canvas.addEventListener('focus', () => { focused = true; });
 canvas.addEventListener('blur', () => { focused = false; });
+
+// The swipe. Pointer events rather than touch events, so a stylus and a mouse
+// drag work by the same path; `touch-action: none` is on the canvas alone, so
+// the rest of the page still scrolls and pull-to-refresh still works
+// everywhere else.
+let gestureStart = null;
+
+canvas.addEventListener('pointerdown', (event) => {
+  gestureStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+});
+
+canvas.addEventListener('pointerup', (event) => {
+  if (gestureStart === null || gestureStart.id !== event.pointerId) return;
+  const direction = resolveSwipe({
+    dx: event.clientX - gestureStart.x,
+    dy: event.clientY - gestureStart.y,
+  });
+  gestureStart = null;
+  if (direction !== null) steer(direction);
+});
+
+canvas.addEventListener('pointercancel', () => { gestureStart = null; });
 
 window.addEventListener('resize', resize);
 motionQuery.addEventListener('change', () => render());
@@ -207,9 +235,7 @@ function watchPixelRatio() {
 }
 watchPixelRatio();
 
-store.subscribe(() => {
-  readout.update(readoutStrings(state, { highScore: store.getState().highScore }));
-});
+store.subscribe(syncViews);
 
 resize();
 syncViews();

@@ -60,8 +60,12 @@ export function readoutStrings(state, { highScore = 0 } = {}) {
  * colour-blind player the index and withholds the only part of it that was
  * ever legible — which is the same failure as drawing the ramp and calling the
  * job done.
+ *
+ * A new high score is a sentence for the same reason. Whatever the board does
+ * to celebrate one — a colour, a flash, a sound that phase 7 will add — is
+ * something at least one player is not receiving, so the fact itself is text.
  */
-export function gameOverSummary(state) {
+export function gameOverSummary(state, { newHighScore = false } = {}) {
   const ramp = rampFor(state);
   const outcome = state.status === 'won'
     ? 'Board filled. You win.'
@@ -70,7 +74,8 @@ export function gameOverSummary(state) {
   return `${outcome} Final score ${state.score}, `
     + `length ${state.snake.length}, `
     + `${reachableFrom(state)} cells reachable at the end, `
-    + `confinement ${ramp.name}.`;
+    + `confinement ${ramp.name}.`
+    + (newHighScore ? ' A new best score.' : '');
 }
 
 /** The one honest line about a save that this session must not write over. */

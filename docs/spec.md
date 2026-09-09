@@ -596,6 +596,31 @@ This is required work in this phase, not a later tidy-up: a board that takes
 itself away on a timer takes the game-over summary with it, and that summary is
 where the ramp step is named for a player who could not read the colour.
 
+#### The swipe tie, and where the threshold is measured
+
+The threshold is measured against the **winning axis**, not against the
+diagonal. 25 by 25 is a 35 px hypotenuse — over a distance test — while
+neither axis carries 30 px of intent; that gesture is a tap with a wobble and
+must not steer.
+
+A swipe with `|dx|` exactly equal to `|dy|` resolves to the **horizontal**
+axis. It has to go somewhere, the board is wider than it is tall, and a rule
+written down is a decision rather than an accident.
+
+#### Where phase 6's code lives
+
+`src/input/keyboard.js` and `src/input/swipe.js` are pure — a key or a pair of
+deltas in, an intention out — and hold the three questions that gate
+`preventDefault`. `src/session.js` owns the board, the accumulator and the end
+of a run, with no DOM, so the game-over lifecycle and step mode are tested as
+logic. `src/ui/gameover.js`, `src/ui/dpad.js` and `src/ui/settings.js` are the
+nodes. `src/main.js` remains the only file that names `window` or
+`localStorage`, and the only place `preventDefault` is called.
+
+The readout still owns the summary node, as it owns every node it writes; the
+game-over region is handed the string through an injected `writeSummary` so
+there is one owner of that element rather than two modules taking turns.
+
 **Step mode**, a settings toggle: the snake advances one cell per keypress
 instead of on a timer. The game becomes turn-based and fully playable from a
 keyboard with announcements, because there is no clock to lose to. This is
@@ -617,6 +642,16 @@ Tests:
 - A finished run stays finished: no timer replaces the board, and the game-over
   summary is still in the DOM after phase 5's `AUTO_RESTART_MS` would have
   elapsed. The restart control, and only the restart control, starts a new one.
+- On death, `store.submitScore` is called exactly once, with the final score,
+  however many frames run afterwards.
+- On death, focus lands on the restart button rather than on `<body>`. Both
+  outcomes put the same region on the page; only `activeElement` separates
+  them, and only one of them tells the player the run ended.
+- A run that beats the stored high score produces summary text saying so, and
+  a run that does not, does not. Measured before the submit, or every run is a
+  new best against itself.
+- Arrow keys are not prevented once the run is over.
+- Tab is never prevented, in any state.
 
 ### Phase 7 — Audio
 

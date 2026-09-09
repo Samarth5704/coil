@@ -12,6 +12,12 @@
 
   *, *::before, *::after { box-sizing: border-box; }
 
+  /* The `hidden` attribute is `display: none` in the UA stylesheet, which any
+     author rule that sets `display` on the same element beats — so a region
+     given `display: flex` here stays on the page while carrying `hidden`, and
+     the game-over summary would be visible before a run had ended. */
+  [hidden] { display: none !important; }
+
   html, body {
     margin: 0;
     padding: 0;
@@ -68,7 +74,9 @@
   .board {
     min-width: 0;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
   }
 
   canvas {
@@ -128,6 +136,133 @@
     font-size: 0.8125rem;
   }
 
+  /* Every control on the page: the restart button, the d-pad, the settings.
+     One ring, drawn on :focus-visible so a mouse press does not leave one
+     behind, and 2 px so it survives against the panel edge. */
+  button, select, input[type="checkbox"] {
+    font: inherit;
+    color: var(--text-primary);
+  }
+
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .button {
+    min-height: 44px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border: 1px solid var(--wall);
+    cursor: pointer;
+  }
+
+  .gameover {
+    margin: 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .gameover p {
+    margin: 0;
+  }
+
+  /* The d-pad. Hidden where there is a pointer that hovers — a mouse or a
+     trackpad has the keyboard beside it — and shown on a coarse pointer,
+     which is a finger. 44 px minimum on every target. */
+  .dpad {
+    display: none;
+    grid-template-columns: repeat(3, 56px);
+    grid-template-rows: repeat(3, 56px);
+    gap: 6px;
+  }
+
+  @media (pointer: coarse) {
+    .dpad { display: grid; }
+  }
+
+  .dpad button {
+    min-width: 44px;
+    min-height: 44px;
+    width: 100%;
+    height: 100%;
+    background: var(--surface);
+    border: 1px solid var(--wall);
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .dpad button[data-direction="up"] { grid-column: 2; grid-row: 1; }
+  .dpad button[data-direction="left"] { grid-column: 1; grid-row: 2; }
+  .dpad button[data-direction="right"] { grid-column: 3; grid-row: 2; }
+  .dpad button[data-direction="down"] { grid-column: 2; grid-row: 3; }
+
+  .settings {
+    margin: 16px 0 0;
+    padding: 12px 0 0;
+    border-top: 1px solid var(--lattice);
+  }
+
+  .settings h2 {
+    margin: 0 0 8px;
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .setting {
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 0.8125rem;
+  }
+
+  .setting select {
+    background: var(--surface);
+    border: 1px solid var(--wall);
+    min-height: 44px;
+    padding: 0 8px;
+  }
+
+  .setting input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    /* The label is part of the target; together they clear 44 px. */
+    margin: 11px 0;
+  }
+
+  .setting label {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    /* Shares the row with its checkbox and wraps its own text, rather than
+       wrapping the whole row and leaving the checkbox stranded on a line of
+       its own with its name underneath. */
+    flex: 1 1 0;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  /* The select is wider than a checkbox and its label is not a click target
+     for a tick, so that row stacks: label over control, both full width. */
+  .setting-stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .setting-stacked label {
+    flex: 0 0 auto;
+  }
+
   .visually-hidden {
     position: absolute;
     width: 1px;
@@ -154,6 +289,10 @@
     <!-- role and aria-label are set from JS on state transitions only, never
          per tick, and this is never a live region. -->
     <canvas id="surface" tabindex="0" role="img" aria-label="Coil board."></canvas>
+
+    <!-- Four real buttons, built by src/ui/dpad.js and appended here. Shown on
+         a coarse pointer; the keyboard is the same four directions. -->
+    <div class="dpad" id="dpad" data-role="dpad" role="group" aria-label="Steering"></div>
   </div>
 
   <div class="panel">
@@ -169,18 +308,54 @@
       <dt>Length</dt><dd data-field="length">—</dd>
     </dl>
 
-    <!-- Written once, on game over. Not a live region: a sentence read aloud
-         every tick is noise, and this is here to be found, not announced. -->
-    <p class="visually-hidden" data-field="summary" id="summary"></p>
+    <!-- The game-over state. It stays until the player leaves it: phase 5's
+         auto-restart timer is gone, and it is gone because it took this
+         region, and the ramp step named inside it, away on a clock. -->
+    <div class="gameover" data-role="gameover" id="gameover" hidden>
+      <!-- Written once, at the transition. Not a live region: a sentence read
+           aloud every tick is noise, and this is here to be found. -->
+      <p class="visually-hidden" data-field="summary" id="summary"></p>
+      <!-- The same news for a player who is looking rather than listening.
+           Hidden from the accessibility tree so the summary above is not
+           announced twice. -->
+      <p aria-hidden="true">Run over.</p>
+      <button type="button" class="button" data-role="restart"
+              aria-label="Start a new run">New run</button>
+    </div>
 
-    <!-- One honest line when the stored save came from a newer build of the
-         game and this session must not write over it. -->
-    <p class="hint" data-field="hint" id="hint" hidden></p>
+    <section class="settings" data-role="settings" aria-labelledby="settings-heading">
+      <h2 id="settings-heading">Settings</h2>
 
-    <p class="note" id="phase-note">
-      Phase 5 renders and runs the loop. Input arrives in phase 6, so the snake
-      holds its heading, dies against a wall, and a fresh board follows.
-    </p>
+      <p class="setting">
+        <input type="checkbox" id="set-sound" data-setting="sound">
+        <label for="set-sound">Sound</label>
+      </p>
+
+      <p class="setting">
+        <input type="checkbox" id="set-step" data-setting="stepMode">
+        <label for="set-step">Step mode: one move per key press</label>
+      </p>
+
+      <p class="setting setting-stacked">
+        <label for="set-motion">Reduced motion</label>
+        <!-- Three states, not two. The stored value is null, true or false,
+             and null — follow the system setting — is the default, which a
+             checkbox has nowhere to put. -->
+        <select id="set-motion" data-setting="reducedMotion">
+          <option value="system">Follow my system setting</option>
+          <option value="on">Always reduce motion</option>
+          <option value="off">Never reduce motion</option>
+        </select>
+      </p>
+
+      <!-- One honest line when the stored save came from a newer build of the
+           game and this session must not write over it. -->
+      <p class="hint" data-field="hint" id="hint" hidden></p>
+
+      <p class="note">
+        Sound is saved now and synthesised in phase 7; nothing plays yet.
+      </p>
+    </section>
   </div>
 </div>
 
