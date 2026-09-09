@@ -10,6 +10,8 @@ import {
   rampFor,
   readoutStrings,
   gameOverSummary,
+  IDLE_INSTRUCTION,
+  ariaLabelFor,
   createAriaLabeller,
   nonWritableHint,
 } from '../src/render/labels.js';
@@ -82,6 +84,29 @@ describe('the readout strings', () => {
     const strings = readoutStrings(state, { highScore: 0 });
     expect(strings.ramp).toBe(RAMP_NAMES[rampStepFor(state)]);
     expect(strings.reachable).toBe(String(reachableFrom(state)));
+  });
+});
+
+describe('the idle sentence', () => {
+  it('tells a screen reader the board is ready and how to start it', () => {
+    // The canvas is an image to a screen reader, so the way in has to be in
+    // the sentence attached to it, not only in the pixels.
+    const state = createGame({ width: 24, height: 18, rng: () => 0.5 });
+    const label = ariaLabelFor(state, { idle: true });
+
+    expect(label).toMatch(/ready/i);
+    expect(label).toContain(IDLE_INSTRUCTION);
+  });
+
+  it('outranks paused, because a board that never started was not interrupted', () => {
+    const state = createGame({ width: 24, height: 18, rng: () => 0.5 });
+    expect(ariaLabelFor(state, { idle: true, paused: true })).toMatch(/ready/i);
+    expect(ariaLabelFor(state, { idle: false, paused: true })).toMatch(/paused/i);
+  });
+
+  it('is not the sentence a started board gets', () => {
+    const state = createGame({ width: 24, height: 18, rng: () => 0.5 });
+    expect(ariaLabelFor(state, { idle: false })).not.toMatch(/ready/i);
   });
 });
 

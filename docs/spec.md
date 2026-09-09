@@ -596,6 +596,57 @@ This is required work in this phase, not a later tidy-up: a board that takes
 itself away on a timer takes the game-over summary with it, and that summary is
 where the ramp step is named for a player who could not read the colour.
 
+#### The lifecycle: idle, running, over
+
+A run has three states, not two.
+
+```
+        first directional input
+idle ─────────────────────────────> running
+ ^                                     │
+ │                                     │ wall, self, or the board filled
+ │            restart button           v
+ └──────────────────────────────────  over
+```
+
+**idle** — the board is drawn and has not moved: starting position, walls,
+lattice and readout, and the loop scheduling frames that buy no ticks. This
+state exists because the alternative is a page that plays itself. A fresh
+board holds its heading, reaches the right-hand wall in **eleven ticks**, and
+is therefore finished about a second and a half after the page loads — so a
+visitor arrives at a game they never played, already over, with the summary
+written and the score submitted.
+
+**running** — entered by the first directional input, from any source: an
+arrow or WASD key, a swipe on the play surface, or an on-screen d-pad press.
+That input is **also applied as the first turn**. A press that only wakes the
+board and is then swallowed reads as a dropped input — the player presses up,
+the snake carries on right, and they blame the game rather than the design. In
+step mode the same press starts the run and advances exactly one tick, because
+step mode has no clock and a first press that moves nothing has done nothing.
+
+The keys that only advance — space and enter — do not leave idle. Steering is
+what starts a game; there is nothing yet to advance.
+
+**over** — a finished run. It stays finished; see "Removing phase 5's
+auto-restart" above. The restart button is the only way out, and it returns to
+**idle**, not to running: the player asked for a board to play, not to be
+dropped into a run already under way with their hand off the keys.
+
+#### The app never moves focus before the player has acted
+
+Focus moves in exactly two places, and both answer something the player did:
+to the restart button when a run ends, and to the play surface when the
+restart button is pressed. **Nothing moves focus while the board is idle**, and
+nothing moves it on a timer.
+
+This is not a nicety. The old behaviour moved focus to a button roughly 1.5
+seconds after page load, with no user action anywhere in the causal chain — a
+page grabbing the visitor rather than answering them, and for a screen reader
+user, being taken somewhere they did not ask to go while still reading the
+page. The death focus move is not weakened by this rule and is not in tension
+with it: by the time a run ends, the player has pressed something.
+
 #### The swipe tie, and where the threshold is measured
 
 The threshold is measured against the **winning axis**, not against the
@@ -620,8 +671,11 @@ because rAF hands its callback the timestamp and nothing in that file reads
 test drive sixty ticks, a forty-second frame and a tab switch through the real
 loop without a browser — which is not a luxury: `requestAnimationFrame` does
 not fire in a preview pane that is not painting, so the timed loop cannot be
-observed there at all. `src/ui/gameover.js`, `src/ui/dpad.js` and
-`src/ui/settings.js` are the nodes. `src/main.js` remains the only file that
+observed there at all. `src/ui/gameover.js`, `src/ui/idle.js`,
+`src/ui/dpad.js` and `src/ui/settings.js` are the nodes. The idle
+instruction is written once, as `IDLE_INSTRUCTION` in `src/render/labels.js`,
+because it is said twice — as text on the page and inside the canvas
+aria-label for the idle phase — and two copies of a sentence drift. `src/main.js` remains the only file that
 names `window` or `localStorage`, and the only place `preventDefault` is
 called.
 
@@ -660,8 +714,23 @@ Tests:
   new best against itself.
 - Arrow keys are not prevented once the run is over.
 - Tab is never prevented, in any state.
-- A fresh board left alone survives eleven ticks before the right-hand wall,
-  which is what "no input" looks like — not a board that dies on load.
+- A fresh session is idle and advances zero ticks across ten seconds of
+  simulated frames.
+- The first directional input transitions to running **and** is applied as the
+  first turn: a fresh board given "up" has its head one cell up after one
+  tick, not one cell right. Asserted for a key, and for a swipe or d-pad
+  press.
+- In step mode, the first keypress both starts the game and advances exactly
+  one tick.
+- No focus move occurs while idle, including past the point at which the board
+  used to have killed itself.
+- The idle instruction is present in idle and absent in running, and comes
+  back on restart.
+- Restart from over lands in idle, not running, and advances zero ticks until
+  the next input.
+- A *started* board left alone survives eleven ticks before the right-hand
+  wall, which is what "no further input" looks like — not a board that dies on
+  load.
 - The loop advances one tick per `tickIntervalFor(state)` of elapsed time
   across sixty ticks, with the interval shrinking underneath it as food is
   eaten. Driven through an injected frame scheduler.

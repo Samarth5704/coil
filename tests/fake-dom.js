@@ -205,6 +205,10 @@ export function keydown(key, fields = {}) {
   return fakeEvent('keydown', { key, repeat: false, ...fields });
 }
 
+// The idle instruction, taken from the one place it is written, so the fixture
+// cannot drift from the page the way two copies of a sentence do.
+import { IDLE_INSTRUCTION } from '../src/render/labels.js';
+
 // The panel markup index.html ships, built as objects: the readout's keyed
 // nodes, the game-over region with its summary and its restart button, and the
 // settings controls. Kept in one place so a test wires the same nodes main.js
@@ -223,6 +227,11 @@ export function appMarkup() {
   const hint = readout.querySelector('[data-field="hint"]');
   readout.children = readout.children.filter((c) => c !== summary && c !== hint);
   panel.appendChild(readout);
+
+  const idle = doc.createElement('p');
+  idle.setAttribute('data-role', 'idle');
+  idle.textContent = IDLE_INSTRUCTION;
+  panel.appendChild(idle);
 
   const region = doc.createElement('div');
   region.setAttribute('data-role', 'gameover');
@@ -256,5 +265,5 @@ export function appMarkup() {
   dpad.setAttribute('data-role', 'dpad');
   panel.appendChild(dpad);
 
-  return { doc, panel, readout, region, restart, settings, dpad };
+  return { doc, panel, readout, idle, region, restart, settings, dpad };
 }

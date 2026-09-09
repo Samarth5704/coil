@@ -75,7 +75,11 @@ function mountApp({ record = {}, seed = 7, setup } = {}) {
   return { ...markup, store, readout, session, gameOver, surface };
 }
 
+// A fresh board is idle. This is the act that starts it, kept neutral: it
+// steers along the heading the board already has, so the run that follows is
+// the run the board would have played.
 function playToDeath(app, limit = 20000) {
+  if (app.session.lifecycle === 'idle') app.session.steer(app.session.state.direction);
   let elapsed = 0;
   while (app.session.state.status === 'playing' && elapsed < limit) {
     app.session.elapse(MAX_FRAME_MS);

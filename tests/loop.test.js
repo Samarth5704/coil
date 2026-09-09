@@ -57,6 +57,10 @@ function mount({ record = {}, seed = 77, paused = false } = {}) {
     paused,
   });
   loop.start();
+  // A fresh board is idle and buys no ticks until the player acts. These cases
+  // are about the clock rather than the lifecycle, so they act once, up front,
+  // and as neutrally as possible: along the heading the board already has.
+  session.steer(session.state.direction);
   return { session, store, frames, loop, drawn };
 }
 

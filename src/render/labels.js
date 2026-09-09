@@ -78,6 +78,21 @@ export function gameOverSummary(state, { newHighScore = false } = {}) {
     + (newHighScore ? ' A new best score.' : '');
 }
 
+/**
+ * How to leave the idle board, in one line.
+ *
+ * Written here rather than only in index.html because it is said twice — as
+ * text on the page and inside the canvas aria-label for the idle phase — and
+ * two copies of a sentence drift. index.html carries the identical string and
+ * tests/markup.test.js pins them together.
+ *
+ * It names all three ways in, because the page has all three and which one is
+ * available is not something the page can know: a keyboard, a swipe, and the
+ * on-screen buttons that appear on a coarse pointer.
+ */
+export const IDLE_INSTRUCTION = 'Press an arrow key or W, A, S or D to start '
+  + '— or swipe the board, or use the arrow buttons.';
+
 /** The one honest line about a save that this session must not write over. */
 export function nonWritableHint(writable) {
   if (writable) return null;
@@ -90,9 +105,12 @@ export function nonWritableHint(writable) {
 
 // The phases a label is written for. Anything that is not one of these is not
 // a transition and does not earn a new sentence.
-function phaseOf(state, { paused = false } = {}) {
+function phaseOf(state, { paused = false, idle = false } = {}) {
   if (state.status === 'dead') return 'dead';
   if (state.status === 'won') return 'won';
+  // Idle outranks paused: a board that has not started is not a board whose
+  // run was interrupted, whatever the tab is doing.
+  if (idle) return 'idle';
   return paused ? 'paused' : 'playing';
 }
 
@@ -114,6 +132,9 @@ export function ariaLabelFor(state, context = {}) {
       return `Coil board, ${board}. Game over; the snake hit a wall or itself.`;
     case 'won':
       return `Coil board, ${board}. Board filled; you win.`;
+    case 'idle':
+      return `Coil board, ${board}. Ready to play. ${IDLE_INSTRUCTION} `
+        + 'Score, space and multiplier are in the readout beside the board.';
     case 'paused':
       return `Coil board, ${board}. Paused. Score and space are in the readout beside the board.`;
     default:

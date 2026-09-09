@@ -48,9 +48,47 @@ export function createSession({
   // how the board stays on screen — and a submit per frame would be a storage
   // write per frame.
   let ended = false;
+  // Whether the player has acted on this board yet. A board that has not been
+  // acted on does not move: see the lifecycle note below.
+  let acted = false;
 
-  const running = () => state.status === 'playing';
+  // A board accepts steering while it is playing, which is both idle and
+  // running. `over` is the one state that does not, and it is the state that
+  // hands the arrow keys back to the browser.
+  const playable = () => state.status === 'playing';
   const stepMode = () => Boolean(store.getState().stepMode);
+
+  /**
+   * idle → running → over → (restart) → idle.
+   *
+   * **idle** is a board that is drawn and has not moved. It exists because the
+   * alternative is a page that plays itself: a fresh board holds its heading,
+   * reaches the right-hand wall in eleven ticks, and is therefore over about a
+   * second and a half after the page loads — so a visitor arrives at a game
+   * they never played, already finished. Worse, the end of a run moves focus,
+   * and moving focus on a timer with no user action anywhere behind it is the
+   * page grabbing the player rather than answering them.
+   *
+   * **running** is entered by the first directional input, from any source,
+   * and that input is applied as the first turn rather than swallowed. A press
+   * that only wakes the board and does not steer it reads as a dropped input,
+   * and the player blames the game.
+   *
+   * **over** is a finished run, which stays finished; only restart leaves it,
+   * and restart returns to idle rather than to running.
+   */
+  const lifecycle = () => {
+    if (!playable()) return 'over';
+    return acted ? 'running' : 'idle';
+  };
+
+  // The player has acted. Idempotent, and the only door out of idle.
+  function begin() {
+    if (acted || !playable()) return false;
+    acted = true;
+    view.started?.(state);
+    return true;
+  }
 
   function endRun() {
     ended = true;
@@ -63,7 +101,7 @@ export function createSession({
 
   // One tick, wherever it came from: the accumulator or a keypress.
   function advance() {
-    if (!running()) return false;
+    if (!playable()) return false;
     const before = state.status;
     state = tick(state);
     ticks++;
@@ -77,7 +115,10 @@ export function createSession({
    * a clock, so the clock does not merely go unread, it does not run.
    */
   function elapse(deltaMs) {
-    if (stepMode() || !running()) {
+    // An idle board buys nothing. The loop still runs and still draws — the
+    // starting position, the walls and the lattice are all on screen — it
+    // simply does not spend time on a game the player has not started.
+    if (!acted || stepMode() || !playable()) {
       accumulator = 0;
       return 0;
     }
@@ -88,7 +129,7 @@ export function createSession({
     // The step is re-read each pass, because the interval shortens as the
     // snake eats and the loop has to follow it within the same frame.
     let step = tickIntervalFor(state);
-    while (accumulator >= step && running()) {
+    while (accumulator >= step && playable()) {
       accumulator -= step;
       advance();
       spent++;
@@ -112,6 +153,9 @@ export function createSession({
    * A tap does not repeat.
    */
   function steer(direction) {
+    // The first one of these leaves idle, and is then applied as the turn it
+    // was, not consumed by the transition.
+    begin();
     turn(direction);
     if (stepMode()) {
       advance();
@@ -125,21 +169,32 @@ export function createSession({
    */
   function applyKey(event, { surfaceFocused = false } = {}) {
     const action = interpretKey(event, {
-      running: running(), surfaceFocused, stepMode: stepMode(),
+      running: playable(), surfaceFocused, stepMode: stepMode(),
     });
-    if (action.direction !== null) turn(action.direction);
-    if (action.advance) {
+    if (action.direction !== null) {
+      begin();
+      turn(action.direction);
+    }
+    // `advance` is step mode's one-tick-per-press. It is gated on the board
+    // having been started, so the advance keys — space and enter, which steer
+    // nothing — cannot tick an idle board. Leaving idle is a directional
+    // input's job, in every mode and from every source.
+    if (action.advance && acted) {
       advance();
       view.updated?.(state);
     }
     return action;
   }
 
+  // Back to idle, not to running. The player pressed a button, which is a
+  // request for a board to play, not a request to be dropped into a run that
+  // is already moving before they have their hand back on the keys.
   function restart() {
     state = newBoard();
     accumulator = 0;
     ticks = 0;
     ended = false;
+    acted = false;
     view.restarted?.(state);
   }
 
@@ -152,8 +207,12 @@ export function createSession({
     get ticks() {
       return ticks;
     },
+    // 'idle' | 'running' | 'over'.
+    get lifecycle() {
+      return lifecycle();
+    },
     get running() {
-      return running();
+      return lifecycle() === 'running';
     },
     elapse,
     advance,

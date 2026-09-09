@@ -44,10 +44,16 @@ function makeSession({ store = makeStore(), view = {}, seed = 7, setup } = {}) {
   return { session, store };
 }
 
-// Runs the timed loop until the snake dies against a wall, or gives up. There
-// is no input on this board, so it holds its heading and reaches a wall in
-// about a dozen ticks.
+const BASE_INTERVAL_MS = 140;
+
+// Runs the timed loop until the snake dies against a wall, or gives up.
+//
+// A fresh board is idle and buys no ticks, so this acts once to start it, and
+// acts as neutrally as it can: it steers along the heading the board already
+// has, so the run that follows is the run the board would have played. After
+// that there is no further input, and it holds its heading into a wall.
 function playToDeath(session, limit = 20000) {
+  if (session.lifecycle === 'idle') session.steer(session.state.direction);
   let elapsed = 0;
   while (session.state.status === 'playing' && elapsed < limit) {
     session.elapse(MAX_FRAME_MS);
@@ -89,20 +95,28 @@ describe('step mode', () => {
 
   it('does not run the timed loop while step mode is on', () => {
     const { session } = makeSession({ store: makeStore({ stepMode: true }) });
+    // Started, so a zero here is step mode holding the clock rather than the
+    // board simply not having begun.
+    session.applyKey({ key: 'ArrowRight' }, { surfaceFocused: true });
+    expect(session.lifecycle).toBe('running');
+    expect(session.ticks).toBe(1);
+
     expect(session.elapse(1000)).toBe(0);
-    expect(session.ticks).toBe(0);
+    expect(session.ticks).toBe(1);
   });
 
   it('restores the timed loop when step mode goes off', () => {
     const store = makeStore({ stepMode: true });
     const { session } = makeSession({ store });
+    session.applyKey({ key: 'ArrowRight' }, { surfaceFocused: true });
+    const steppedTicks = session.ticks;
 
     expect(session.elapse(1000)).toBe(0);
 
     store.setStepMode(false);
 
     expect(session.elapse(1000)).toBeGreaterThan(0);
-    expect(session.ticks).toBeGreaterThan(0);
+    expect(session.ticks).toBeGreaterThan(steppedTicks);
   });
 
   it('ignores a keypress the play surface did not have focus for', () => {
@@ -115,23 +129,103 @@ describe('step mode', () => {
 describe('the timed loop', () => {
   it('clamps the delta of one frame, so a backgrounded tab does not return and run three hundred ticks', () => {
     const { session } = makeSession();
+    session.steer('right');
     const ticks = session.elapse(40000);
     // 250 ms of budget at a 140 ms opening interval is one tick, not 285.
     expect(ticks).toBeLessThanOrEqual(Math.ceil(MAX_FRAME_MS / 70));
   });
 });
 
-describe('a fresh board left alone', () => {
+describe('idle', () => {
+  it('is where a fresh session starts, and it buys no ticks across ten seconds of frames', () => {
+    // The named case, and the whole point of the third state. A board that
+    // starts live is a board that has already hit the right-hand wall eleven
+    // ticks — a second and a half — after the page loaded, so the first thing
+    // a visitor sees is a game they never played, already over.
+    const { session } = makeSession();
+
+    expect(session.lifecycle).toBe('idle');
+
+    let elapsed = 0;
+    while (elapsed < 10000) {
+      session.elapse(MAX_FRAME_MS);
+      elapsed += MAX_FRAME_MS;
+    }
+
+    expect(session.ticks).toBe(0);
+    expect(session.lifecycle).toBe('idle');
+    expect(session.state.status).toBe('playing');
+    expect(session.state.snake[0]).toEqual({ x: 13, y: 9 });
+  });
+
+  it('starts on the first directional key and applies that key as the first turn', () => {
+    // The named case. Consuming the press to start the game and throwing it
+    // away is the version of this that feels broken: the player presses up,
+    // the snake goes right, and they blame the game rather than the design.
+    const { session } = makeSession();
+
+    session.applyKey({ key: 'ArrowUp' }, { surfaceFocused: true });
+    expect(session.lifecycle).toBe('running');
+
+    session.elapse(BASE_INTERVAL_MS);
+
+    expect(session.ticks).toBe(1);
+    expect(session.state.snake[0]).toEqual({ x: 13, y: 8 });
+    expect(session.state.direction).toBe('up');
+  });
+
+  it('starts on a swipe or a d-pad press the same way, and applies it as the first turn', () => {
+    const { session } = makeSession();
+
+    session.steer('down');
+    expect(session.lifecycle).toBe('running');
+
+    session.elapse(BASE_INTERVAL_MS);
+
+    expect(session.state.snake[0]).toEqual({ x: 13, y: 10 });
+  });
+
+  it('is not started by a key the board does not steer with', () => {
+    const { session } = makeSession();
+    session.applyKey({ key: 'Tab' }, { surfaceFocused: true });
+    session.applyKey({ key: ' ' }, { surfaceFocused: true });
+    session.applyKey({ key: 'q' }, { surfaceFocused: true });
+
+    expect(session.lifecycle).toBe('idle');
+    expect(session.ticks).toBe(0);
+  });
+
+  it('is not started by a key pressed somewhere other than the play surface', () => {
+    const { session } = makeSession();
+    session.applyKey({ key: 'ArrowUp' }, { surfaceFocused: false });
+    expect(session.lifecycle).toBe('idle');
+  });
+
+  it('starts the game and advances exactly one tick on the first keypress in step mode', () => {
+    // The named case. Step mode has no clock, so starting the run and moving
+    // are the same press or the first press does nothing visible at all.
+    const { session } = makeSession({ store: makeStore({ stepMode: true }) });
+
+    session.applyKey({ key: 'ArrowUp' }, { surfaceFocused: true });
+
+    expect(session.lifecycle).toBe('running');
+    expect(session.ticks).toBe(1);
+    expect(session.state.snake[0]).toEqual({ x: 13, y: 8 });
+  });
+});
+
+describe('a running board left alone', () => {
   it('survives eleven ticks before the wall, rather than dying on the spot', () => {
     // Pinned because a summary reading "final score 0, length 4" was mistaken
     // for a board that dies immediately. It does not: the starting snake is
     // four segments facing right with its head at x=13 on a 24-wide board, so
     // it has eleven moves before the wall at 140 ms each, and 1540 ms of it.
-    // Nothing about this is input-dependent, which is why it is worth a name.
+    // Started here by a press, because a fresh board no longer runs on its own.
     const { session } = makeSession();
     expect(session.state.snake[0]).toEqual({ x: 13, y: 9 });
     expect(session.state.direction).toBe('right');
 
+    session.applyKey({ key: 'ArrowRight' }, { surfaceFocused: true });
     const dead = playToDeath(session);
 
     expect(session.ticks).toBe(11);
@@ -206,17 +300,33 @@ describe('the end of a run', () => {
     expect(session.state.snake).toEqual(dead.snake);
   });
 
-  it('starts a new board only when restart is called', () => {
+  it('starts a new board only when restart is called, and lands it in idle', () => {
+    // The named case. Restart hands back a board that is ready, not one that
+    // is already moving: the player pressed a button, which is not the same as
+    // asking to be dropped into a run already under way.
     const { session } = makeSession();
     playToDeath(session);
     const finished = session.state;
 
     session.restart();
 
+    expect(session.lifecycle).toBe('idle');
     expect(session.state.status).toBe('playing');
     expect(session.state).not.toBe(finished);
     expect(session.state.score).toBe(0);
     expect(session.ticks).toBe(0);
+
+    let elapsed = 0;
+    while (elapsed < 10000) {
+      session.elapse(MAX_FRAME_MS);
+      elapsed += MAX_FRAME_MS;
+    }
+    expect(session.ticks).toBe(0);
+    expect(session.lifecycle).toBe('idle');
+
+    // And the next directional input starts it, exactly as on first load.
+    session.steer('up');
+    expect(session.lifecycle).toBe('running');
   });
 
   it('submits again after a restart, because the next run is a different run', () => {
@@ -229,6 +339,12 @@ describe('the end of a run', () => {
     playToDeath(session);
 
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports the finished board as over, not as running', () => {
+    const { session } = makeSession();
+    playToDeath(session);
+    expect(session.lifecycle).toBe('over');
   });
 
   it('does not steer or advance a finished board', () => {

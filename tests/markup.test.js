@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { IDLE_INSTRUCTION } from '../src/render/labels.js';
 import { createGameOver } from '../src/ui/gameover.js';
 import { createReadout } from '../src/ui/readout.js';
 import { appMarkup } from './fake-dom.js';
@@ -112,6 +113,25 @@ describe('the game-over region is not displayed before the first death', () => {
       && !/\[hidden\]/.test(rule.selector)
     ));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('the idle instruction is one sentence, written once', () => {
+  it('carries the identical text in index.html and in IDLE_INSTRUCTION', () => {
+    // It is said twice — as text on the page and inside the canvas aria-label
+    // for the idle phase — and two copies of a sentence drift. The page is the
+    // copy a sighted player reads and the label is the copy a screen reader
+    // reads; they must not come to describe different games.
+    const node = html.match(/<p[^>]*data-role="idle"[^>]*>([\s\S]*?)<\/p>/);
+    expect(node, 'no idle instruction in index.html').not.toBe(null);
+    expect(node[1].trim()).toBe(IDLE_INSTRUCTION);
+  });
+
+  it('is visible on load, because it is not marked hidden in the markup', () => {
+    // The board is idle when the page arrives, so the way in is on screen
+    // before any script has run.
+    const tag = html.match(/<p[^>]*data-role="idle"[^>]*>/)[0];
+    expect(tag).not.toMatch(/\shidden[\s>=]/);
   });
 });
 

@@ -159,6 +159,14 @@
     cursor: pointer;
   }
 
+  .idle {
+    margin: 12px 0 0;
+    padding: 8px 10px;
+    border-left: 3px solid var(--ramp-0-calm);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+  }
+
   .gameover {
     margin: 12px 0 0;
     display: flex;
@@ -307,6 +315,14 @@
       <dt>Confinement</dt><dd data-field="ramp">—</dd>
       <dt>Length</dt><dd data-field="length">—</dd>
     </dl>
+
+    <!-- Shown while the board is idle and hidden the moment it starts. Real
+         text, in the markup, because the canvas is an image to a screen
+         reader and a board with no visible way in is one the visitor has to
+         guess at. The identical sentence is in IDLE_INSTRUCTION in
+         src/render/labels.js, which the canvas aria-label uses; a test pins
+         the two together. -->
+    <p class="idle" data-role="idle" id="idle">Press an arrow key or W, A, S or D to start — or swipe the board, or use the arrow buttons.</p>
 
     <!-- The game-over state. It stays until the player leaves it: phase 5's
          auto-restart timer is gone, and it is gone because it took this

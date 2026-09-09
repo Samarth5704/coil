@@ -28,6 +28,7 @@ import {
 } from './render/labels.js';
 import { createReadout } from './ui/readout.js';
 import { createGameOver } from './ui/gameover.js';
+import { createIdleNote } from './ui/idle.js';
 import { createDpad } from './ui/dpad.js';
 import { createSettings } from './ui/settings.js';
 import { resolveSwipe } from './input/swipe.js';
@@ -67,6 +68,13 @@ const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 let focused = false;
 
+// The line that says how to start, shown while the board is idle. The board no
+// longer runs on load: it draws its starting position and waits, because a
+// board that starts live is over eleven ticks later, and the end of a run
+// moves focus — which, with no user action behind it, is the page grabbing the
+// player rather than answering them.
+const idleNote = createIdleNote({ root: panel });
+
 // The game-over region owns the button and where focus goes; the readout owns
 // the summary node, as it owns every node it writes, and is handed the string
 // through writeSummary. One node, one owner.
@@ -88,6 +96,11 @@ const session = createSession({
   store,
   view: {
     updated: syncViews,
+    // The player has acted, so the instruction has done its job.
+    started: () => {
+      idleNote.hide();
+      syncViews();
+    },
     ended: (state, { newHighScore }) => {
       syncViews();
       // The summary carries the ramp step BY NAME, and says so in words when
@@ -95,8 +108,12 @@ const session = createSession({
       // had from the colour on the board.
       gameOver.show(gameOverSummary(state, { newHighScore }));
     },
+    // Restart returns the board to idle, so the instruction comes back with
+    // it. Focus moves to the play surface here — a response to the button the
+    // player just pressed, not a move the app made on its own.
     restarted: () => {
       gameOver.hide();
+      idleNote.show();
       syncViews();
     },
   },
@@ -143,7 +160,10 @@ function syncViews() {
   const state = session.state;
   readout.update(readoutStrings(state, { highScore: store.getState().highScore }));
 
-  const update = labeller.update(state, { paused: loop.isPaused() });
+  const update = labeller.update(state, {
+    paused: loop.isPaused(),
+    idle: session.lifecycle === 'idle',
+  });
   // The label is written to the canvas exactly when the labeller says it
   // changed: at the start, at a pause, at a death and at the win. Never per
   // tick, and never into a live region.
@@ -223,6 +243,10 @@ function watchPixelRatio() {
 watchPixelRatio();
 
 store.subscribe(syncViews);
+
+// Idle from the first frame: the note is in the markup already, and this is
+// the state the rest of the app agrees with.
+idleNote.show();
 
 resize();
 syncViews();
