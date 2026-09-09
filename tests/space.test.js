@@ -39,6 +39,28 @@ function corridor(length, food = PATH[PATH.length - 1]) {
   return build({ snake: PATH.slice(0, length).reverse(), food });
 }
 
+// A full-height wall of body at x = c, with the head at (c-1, 0) on its left.
+// The head can reach exactly the c columns left of the wall, less its own
+// cell, so reachable is 18c - 1. The two cells past the foot of the wall park
+// the tail on the far side, where vacating cannot reopen the split.
+//
+// Length is 21 for every c. That is the whole point of this shape: it moves
+// reachable space without moving length, which is the only way to test a
+// multiplier that depends on both.
+function walled(c) {
+  const snake = [at(c - 1, 0)];
+  for (let y = 0; y < HEIGHT; y++) snake.push(at(c, y));
+  snake.push(at(c + 1, HEIGHT - 1));
+  snake.push(at(c + 2, HEIGHT - 1));
+  return build({ snake, food: at(0, HEIGHT - 1) });
+}
+
+// Same 21 segments, laid flat along the top row, sealing nothing.
+const openBoard = () => build({
+  snake: PATH.slice(0, 21).reverse(),
+  food: PATH[PATH.length - 1],
+});
+
 // Head at (1,1), walled into the top-left corner by its own body. The tail is
 // out at (5,0), well clear of the pocket, so vacating cannot open it.
 const POCKET_SNAKE = [
@@ -108,12 +130,16 @@ describe('reachable space', () => {
     expect(reachableFrom(state)).toBe(422);
   });
 
-  it('returns 0 for a head against a wall with body on the other three sides, and clamps the multiplier to 5', () => {
+  it('returns 0 for a head against a wall with body on the other three sides, and reads slack 0 as 5x', () => {
     const state = build({ snake: ENCLOSED_SNAKE, food: FAR_FOOD });
     expect(state.direction).toBe('down');
     expect(reachableFrom(state)).toBe(0);
+
+    // slack = 0 / 8. Length is never zero, so the division is safe.
+    expect(state.snake.length).toBe(8);
+    expect(reachableFrom(state) / state.snake.length).toBe(0);
     expect(multiplierFor(state)).toBe(5);
-    expect(rampStepFor(state)).toBe(3);
+    expect(rampStepFor(state)).toBe(4);
   });
 
   it('leaves the state it was given untouched', () => {
@@ -148,26 +174,24 @@ describe('reachable space', () => {
 });
 
 describe('the multiplier', () => {
-  it('is 1 on a fresh board', () => {
+  it('is 1 on a fresh board, where slack is 107.25', () => {
     const state = build({ food: at(2, 2) });
+    expect(reachableFrom(state)).toBe(429);
+    expect(state.snake.length).toBe(4);
+    expect(reachableFrom(state) / state.snake.length).toBe(107.25);
     expect(multiplierFor(state)).toBe(1);
   });
 
-  it('never decreases across a scripted sequence of shrinking reachable space', () => {
-    const states = [
-      corridor(4),
-      corridor(100),
-      corridor(200),
-      corridor(300),
-      corridor(400),
-      corridor(430),
-      build({ snake: ENCLOSED_SNAKE, food: FAR_FOOD }),
-    ];
+  it('never decreases as reachable space shrinks with the snake length held constant', () => {
+    // Only the wall moves. Every board here is 21 segments, so nothing in the
+    // sequence can be explained by the snake getting longer.
+    const states = [walled(10), walled(6), walled(3), walled(2), walled(1)];
+    for (const state of states) expect(state.snake.length).toBe(21);
 
     const reachable = states.map(reachableFrom);
     const multipliers = states.map(multiplierFor);
 
-    expect(reachable).toEqual([429, 332, 232, 132, 32, 2, 0]);
+    expect(reachable).toEqual([179, 107, 53, 35, 17]);
     for (let i = 1; i < reachable.length; i++) {
       expect(reachable[i]).toBeLessThan(reachable[i - 1]);
       expect(multipliers[i]).toBeGreaterThanOrEqual(multipliers[i - 1]);
@@ -175,44 +199,66 @@ describe('the multiplier', () => {
 
     // A sequence that never leaves 1x would satisfy "never decreases" while
     // proving nothing, so pin the band it actually walks.
-    expect(multipliers).toEqual([1, 1, 2, 3, 4, 4, 5]);
+    expect(multipliers).toEqual([1, 2, 3, 4, 5]);
   });
 
-  it('maps every multiplier onto a ramp step of 0 to 3, with 4x and 5x both sealed', () => {
-    const cases = [
-      [corridor(4), 1, 0],
-      [corridor(200), 2, 1],
-      [corridor(300), 3, 2],
-      [corridor(400), 4, 3],
-      [build({ snake: ENCLOSED_SNAKE, food: FAR_FOOD }), 5, 3],
-    ];
-    for (const [state, multiplier, step] of cases) {
-      expect(multiplierFor(state)).toBe(multiplier);
-      expect(rampStepFor(state)).toBe(step);
+  it('gives a coiled snake and an open snake of the same length different multipliers', () => {
+    const open = openBoard();
+    const coiled = walled(1);
+
+    // Identical length. Anything that differs below is confinement, not size.
+    expect(open.snake.length).toBe(21);
+    expect(coiled.snake.length).toBe(21);
+
+    expect(reachableFrom(open)).toBe(412);
+    expect(reachableFrom(coiled)).toBe(17);
+
+    expect(multiplierFor(open)).toBe(1);
+    expect(multiplierFor(coiled)).toBe(5);
+    expect(multiplierFor(coiled)).toBeGreaterThan(multiplierFor(open));
+  });
+
+  it('returns a ramp step of 0 to 4 that is exactly the multiplier minus one, across all five bands', () => {
+    const states = [walled(10), walled(6), walled(3), walled(2), walled(1)];
+    const steps = states.map(rampStepFor);
+
+    for (const state of states) {
+      expect(rampStepFor(state)).toBe(multiplierFor(state) - 1);
+    }
+    expect(steps).toEqual([0, 1, 2, 3, 4]);
+    for (const step of steps) {
+      expect(step).toBeGreaterThanOrEqual(0);
+      expect(step).toBeLessThanOrEqual(4);
     }
   });
 });
 
 describe('scoring', () => {
   it('awards 10 times the multiplier from before the food was consumed, not after', () => {
-    // 107 segments leaves 325 reachable, one cell the open side of the 1x/2x
-    // boundary. Eating takes it to 324, which is 2x. The two multipliers
-    // therefore differ, and reading the wrong state shows up as 20 not 10.
-    // Food on PATH[107], the very cell the head is about to enter.
-    const before = corridor(107, PATH[107]);
-    expect(before.food).toEqual(at(11, 4));
+    // 144 segments with 288 reachable is slack 2.0 exactly, the bottom edge of
+    // the 3x band. Eating makes it 287 over 145, which is 1.979 and drops into
+    // 4x. The two multipliers therefore differ, and reading the wrong one
+    // shows up as 40 rather than 30.
+    //
+    // The path turns a row here, so the heading has to be steered onto the
+    // food rather than simply continuing.
+    const before = enqueueTurn(corridor(144, PATH[144]), 'down');
+    expect(before.food).toEqual(at(0, 6));
     expect(tailHeldOnNextMove(before)).toBe(true);
-    expect(reachableFrom(before)).toBe(325);
-    expect(multiplierFor(before)).toBe(1);
+    expect(before.snake.length).toBe(144);
+    expect(reachableFrom(before)).toBe(288);
+    expect(reachableFrom(before) / before.snake.length).toBe(2);
+    expect(multiplierFor(before)).toBe(3);
     expect(before.score).toBe(0);
 
     const after = tick(before);
     expect(after.foodEaten).toBe(1);
-    expect(reachableFrom(after)).toBe(324);
-    expect(multiplierFor(after)).toBe(2);
+    expect(after.snake.length).toBe(145);
+    expect(reachableFrom(after)).toBe(287);
+    expect(multiplierFor(after)).toBe(4);
 
-    expect(after.score).toBe(before.score + 10 * 1);
-    expect(after.score).toBe(10);
+    expect(after.score).toBe(before.score + 10 * 3);
+    expect(after.score).toBe(30);
   });
 });
 

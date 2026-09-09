@@ -81,8 +81,8 @@ destroys focus and selection and thrashes layout.
 
 ## Accessibility — a requirement, not a polish pass
 
-- Nothing conveys meaning by colour alone. The four ramp steps sit at only
-  1.1–1.5:1 **against each other**, so the reachable count and multiplier are
+- Nothing conveys meaning by colour alone. The five ramp steps sit at only
+  1.12–1.43:1 **against each other**, so the reachable count and multiplier are
   always present as DOM text, and the ramp step appears by **name** in the
   game-over summary.
 - Contrast is verified by computation. `tools/contrast.mjs` prints actual

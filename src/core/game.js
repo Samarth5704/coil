@@ -11,7 +11,13 @@ const MAX_QUEUED_TURNS = 2;
 const SCORE_PER_FOOD = 10;
 const MIN_MULTIPLIER = 1;
 const MAX_MULTIPLIER = 5;
-const RAMP_STEPS = 4;
+
+// Slack is reachable space per segment: how many cells of room the snake has
+// for each cell of itself. The lowest slack that still earns each multiplier,
+// in order, so 1x needs eight cells of room per segment and anything under one
+// cell per segment falls off the end at 5x.
+const SLACK_FLOORS = [8, 4, 2, 1];
+
 const BASE_TICK_MS = 140;
 const TICK_STEP_MS = 6;
 const MIN_TICK_MS = 70;
@@ -342,20 +348,35 @@ function visit(at, blocked, seen, stack) {
   return 1;
 }
 
+// Scaled by the snake's own length, not by the board. Dividing by board area
+// made this a length meter in disguise: on an open 432-cell board it took 120
+// segments to leave 1x, so a hundred-segment run scored exactly as flat as a
+// four-segment one no matter how the player was playing.
 export function multiplierFor(state) {
-  const total = state.width * state.height;
-  const raw = 1 + Math.floor(((total - reachableFrom(state)) / total) * 4);
-  return raw < MIN_MULTIPLIER ? MIN_MULTIPLIER
-    : raw > MAX_MULTIPLIER ? MAX_MULTIPLIER
-      : raw;
+  const length = state.snake.length;
+  if (length < 1) {
+    // validateSnake requires two segments, so no state built through
+    // createGame can reach this. Asserted rather than assumed, because the
+    // whole measure divides by it.
+    throw new RangeError('multiplierFor needs a snake of at least one segment');
+  }
+
+  const slack = reachableFrom(state) / length;
+  let multiplier = MIN_MULTIPLIER;
+  for (const floor of SLACK_FLOORS) {
+    if (slack >= floor) return multiplier;
+    multiplier++;
+  }
+  return MAX_MULTIPLIER;
 }
 
 export function tickIntervalFor(state) {
   return Math.max(MIN_TICK_MS, BASE_TICK_MS - TICK_STEP_MS * state.foodEaten);
 }
 
-// Four ramp steps against five multipliers, so the top two share the last
-// one: by 4x the board is sealed enough that there is nothing louder to say.
+// Five ramp steps against five multipliers, one each. An earlier four-step
+// ramp collapsed 4x and 5x into one colour, which spent the distinction at
+// exactly the point in a run where it carries the most information.
 export function rampStepFor(state) {
-  return Math.min(RAMP_STEPS - 1, multiplierFor(state) - 1);
+  return multiplierFor(state) - 1;
 }

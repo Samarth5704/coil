@@ -13,7 +13,7 @@ game.
 
 Reachable space drives three things at once:
 
-- **Colour.** A four-step ramp from calm to sealed.
+- **Colour.** A five-step ramp from calm to sealed.
 - **Sound.** The tick beep rises in pitch as space closes.
 - **Score.** The multiplier is bound to how confined you are, so playing in
   tight space is worth more. The apple in the open is worth 1×; the apple you
@@ -280,10 +280,27 @@ Still pure core, still no UI.
 
 `reachableFrom(state)` flood-fills the free cells reachable from the head using
 four-way adjacency, treating the snake's body as blocking and applying the
-tail-vacate exception. `multiplierFor(state)` derives
-`1 + floor((total - reachable) / total * 4)`, clamped to 1–5.
-`tickIntervalFor(state)` derives `max(70, 140 - 6 * foodEaten)` in
-milliseconds. `rampStepFor(state)` derives an index 0–3 from the multiplier.
+tail-vacate exception. `tickIntervalFor(state)` derives
+`max(70, 140 - 6 * foodEaten)` in milliseconds.
+
+`multiplierFor(state)` bands **slack**, which is
+`reachableFrom(state) / snake.length` — reachable space per segment of snake:
+
+| slack          | multiplier |
+|----------------|------------|
+| `>= 8`         | 1×         |
+| `>= 4`, `< 8`  | 2×         |
+| `>= 2`, `< 4`  | 3×         |
+| `>= 1`, `< 2`  | 4×         |
+| `< 1`          | 5×         |
+
+Scaled by the snake's own length, never by board area. An earlier version
+divided by `total`, which made the multiplier a length meter in disguise: on a
+432-cell board it took 120 segments to leave 1× and 250 to reach 3×, so a
+hundred-segment run still read 1× and how the player was actually playing
+never entered into it. Length is never zero — `validateSnake` requires two
+segments — but `multiplierFor` asserts it rather than assuming, because the
+whole measure divides by it.
 
 What the count includes: the head's own cell is where the snake stands, not
 room it has, so it is never counted. The tail's cell **is** counted whenever
@@ -293,9 +310,10 @@ arrives and the head can move into it. An open board therefore reads
 vacating tail, and it is the same cell the tail-vacate rule already says the
 head may enter.
 
-`rampStepFor` is `min(3, multiplier - 1)`: four ramp steps against five
-multipliers, so 4× and 5× share the top step. By 4× the board is sealed enough
-that there is nothing louder for the colour to say.
+`rampStepFor` is exactly `multiplier - 1`, an index 0–4: five ramp steps
+against five multipliers, one each. An earlier four-step ramp collapsed 4× and
+5× into a single colour, which spent the distinction at precisely the point in
+a run where it carries the most information.
 
 Score is the one **stored** value in this phase. It accumulates and cannot be
 recovered from a board, unlike the reachable count, the multiplier, the ramp
@@ -307,27 +325,30 @@ in going for the apple rather than the confinement the apple itself caused.
 **Stop point:** `npm test` passes. The confinement value is correct on
 hand-constructed boards. Still nothing visible.
 
-#### Measured, and open — the band barely moves
+#### Measured — the band responds, this bot does not exercise it
 
-First evidence from a played game, seed 77 driven by the test suite's greedy
-food-chaser: 544 ticks, 34 food, final length 38, final score 340. The
-multiplier sat at **1× for 538 of 544 ticks (98.9%)**, touched 4× for five
-ticks and 5× for one, and every apple in the run paid at 1× — 34 × 10 × 1.
-Reachable space ran 429 down to 0, but the fall happened entirely in the last
-handful of ticks, as the snake trapped itself.
+Seed 77 under the slack formula, driven by the test suite's greedy
+food-chaser: 544 ticks, 34 food, final length 38, final score 340.
 
-The arithmetic says why. 2× needs reachable ≤ 324, which means sealing off a
-quarter of a 432-cell board; a 38-segment snake cannot do that except by
-closing a pocket around itself, which kills it moments later. So the band is
-real but it is nearly all endgame, and the spec's "the apple you take with
-forty cells left is worth 5×" describes a state a short snake never reaches.
+| point             | tick | reachable | length | slack  | multiplier |
+|-------------------|------|-----------|--------|--------|------------|
+| start             | 0    | 429       | 4      | 107.25 | 1×         |
+| midpoint          | 271  | 413       | 20     | 20.65  | 1×         |
+| tick before death | 543  | 0         | 38     | 0.00   | 5×         |
 
-Caveat before anything is changed: the driver is a naive chaser that dies at
-length 38, and it never coils deliberately. A human playing for multiplier
-would spend far longer in tight space. This is one bot run, not a verdict on
-the design. Re-measure once the game is playable in phase 5, with a real
-player, before touching the formula — and if it still reads 1× throughout, the
-lever is the `* 4` band width or the `total` denominator, not the flood fill.
+Occupancy: **1× for 538 ticks (98.9%)**, 2× and 3× for none at all, 4× for
+four ticks, 5× for two. Average payout 10.00 per apple, meaning every apple in
+the run paid at 1×.
+
+That is the driver, not the formula. The chaser goes straight at the food,
+never coils, and dies at length 38 with 413 cells still open to it — slack
+never falls below 8 until the two ticks in which it seals itself in. The
+formula does respond to confinement independently of length, which is what the
+coiled-versus-open case proves: two snakes of 21 segments each, one flat along
+the top row and one walled into a 17-cell strip, read 1× and 5×.
+
+Re-measure with a real player in phase 5. Do not tune the bands against a bot
+that never gets into trouble.
 
 Tests:
 
@@ -341,10 +362,18 @@ Tests:
   fill runs on a settled post-tick state, so the question is always about the
   move that has not happened yet.
 - A pocket reachable only diagonally is **not** counted; adjacency is four-way.
-- A head against a wall with body on three sides returns 0, and the multiplier
-  clamps to 5 rather than dividing by zero or exceeding the band.
-- The multiplier is 1 on a fresh board, and rises monotonically as reachable
-  space falls across a scripted sequence.
+- A head against a wall with body on three sides returns 0, which is slack 0
+  and therefore 5×, without dividing by zero or exceeding the band.
+- The multiplier is 1 on a fresh board, where slack is 107.25.
+- The multiplier never decreases across a scripted sequence of shrinking
+  reachable space with **snake length held constant**. Length has to be pinned:
+  the multiplier depends on both terms, so a sequence that lets the snake grow
+  proves nothing about confinement.
+- A coiled snake and an open snake **of the same length** get different
+  multipliers. This is the case that proves the multiplier is not merely a
+  length meter, and it is the most important test in this phase.
+- `rampStepFor` returns 0–4 and equals `multiplierFor` minus one, across all
+  five bands.
 - Score after eating is `previous + 10 * multiplierAtTheMomentOfEating`, using
   the multiplier from the state before the food was consumed.
 - Tick interval starts at 140, is 134 after one food, and floors at 70 rather
@@ -383,18 +412,25 @@ Tests:
 Produce `src/tokens.css` and `tools/contrast.mjs` only. No components, no
 canvas drawing, no layout.
 
-The four-step ramp, computed against background `#0a0e0c`:
+The five-step ramp, computed against background `#0a0e0c`:
 
 | Step | Name   | Hex       | Contrast |
 |------|--------|-----------|----------|
 | 0    | calm   | `#6fe3a1` | 12.19:1  |
 | 1    | close  | `#d8e06a` | 13.68:1  |
 | 2    | tight  | `#f0a83c` | 9.59:1   |
-| 3    | sealed | `#ff7361` | 7.29:1   |
+| 3    | hot    | `#ff8f4a` | 8.58:1   |
+| 4    | sealed | `#ff7361` | 7.29:1   |
 
-All four clear AAA at every text size. Adjacent steps sit at only 1.12:1,
-1.43:1 and 1.48:1 **against each other** — which is exactly why the ramp cannot
-be the only signal. See accessibility below.
+All five clear AAA at every text size. Adjacent steps sit at only 1.12:1,
+1.43:1, 1.12:1 and 1.18:1 **against each other** — which is exactly why the
+ramp cannot be the only signal. See accessibility below.
+
+Every ratio in this section was recomputed, not carried over. One figure in the
+previous four-step table did not survive that: it gave tight against sealed as
+1.48:1, and the two hexes actually sit at 1.32:1. Moot now that `hot` falls
+between them, but `tools/contrast.mjs` exists precisely because a number
+written by hand drifts from the colour it describes.
 
 `tools/contrast.mjs` recomputes every foreground/background pair in the token
 file, prints the actual ratios, and exits non-zero if any pair used for text or
