@@ -285,8 +285,49 @@ tail-vacate exception. `multiplierFor(state)` derives
 `tickIntervalFor(state)` derives `max(70, 140 - 6 * foodEaten)` in
 milliseconds. `rampStepFor(state)` derives an index 0–3 from the multiplier.
 
+What the count includes: the head's own cell is where the snake stands, not
+room it has, so it is never counted. The tail's cell **is** counted whenever
+`tailHeldOnNextMove(state)` is false, because the tail leaves it as the head
+arrives and the head can move into it. An open board therefore reads
+`total - snake.length + 1`, not `total - snake.length` — the extra cell is the
+vacating tail, and it is the same cell the tail-vacate rule already says the
+head may enter.
+
+`rampStepFor` is `min(3, multiplier - 1)`: four ramp steps against five
+multipliers, so 4× and 5× share the top step. By 4× the board is sealed enough
+that there is nothing louder for the colour to say.
+
+Score is the one **stored** value in this phase. It accumulates and cannot be
+recovered from a board, unlike the reachable count, the multiplier, the ramp
+step and the tick interval, which are all computed on demand and stored
+nowhere. Eating adds `10 * multiplierFor(state)` read from the board **before**
+the food is taken, so the payout reflects the confinement the player accepted
+in going for the apple rather than the confinement the apple itself caused.
+
 **Stop point:** `npm test` passes. The confinement value is correct on
 hand-constructed boards. Still nothing visible.
+
+#### Measured, and open — the band barely moves
+
+First evidence from a played game, seed 77 driven by the test suite's greedy
+food-chaser: 544 ticks, 34 food, final length 38, final score 340. The
+multiplier sat at **1× for 538 of 544 ticks (98.9%)**, touched 4× for five
+ticks and 5× for one, and every apple in the run paid at 1× — 34 × 10 × 1.
+Reachable space ran 429 down to 0, but the fall happened entirely in the last
+handful of ticks, as the snake trapped itself.
+
+The arithmetic says why. 2× needs reachable ≤ 324, which means sealing off a
+quarter of a 432-cell board; a 38-segment snake cannot do that except by
+closing a pocket around itself, which kills it moments later. So the band is
+real but it is nearly all endgame, and the spec's "the apple you take with
+forty cells left is worth 5×" describes a state a short snake never reaches.
+
+Caveat before anything is changed: the driver is a naive chaser that dies at
+length 38, and it never coils deliberately. A human playing for multiplier
+would spend far longer in tight space. This is one bot run, not a verdict on
+the design. Re-measure once the game is playable in phase 5, with a real
+player, before touching the formula — and if it still reads 1× throughout, the
+lever is the `* 4` band width or the `total` denominator, not the flood fill.
 
 Tests:
 

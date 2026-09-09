@@ -4,79 +4,20 @@ import {
   enqueueTurn,
   tick,
   tailHeldOnNextMove,
-  directionNames,
 } from '../src/core/game.js';
 
-const WIDTH = 24;
-const HEIGHT = 18;
-
-// Deterministic generator, kept in the test file so nothing in src/ depends on
-// it and no dependency is added.
-function mulberry32(seed) {
-  return function () {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const STEP = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-const REVERSE = { up: 'down', down: 'up', left: 'right', right: 'left' };
-
-const at = (x, y) => ({ x, y });
-const key = (c) => c.x + ',' + c.y;
-const head = (state) => state.snake[0];
-
-// A boustrophedon path over the whole board: every cell once, each adjacent to
-// the next, so any prefix of it is a legal snake with snake[0] as the head.
-function serpentine(width, height) {
-  const cells = [];
-  for (let y = 0; y < height; y++) {
-    for (let i = 0; i < width; i++) {
-      cells.push(at(y % 2 === 0 ? i : width - 1 - i, y));
-    }
-  }
-  return cells;
-}
-
-// Drops rng, which is a closure and cannot be compared across two games.
-const snapshot = (state) => JSON.parse(JSON.stringify(state));
-
-// Steers at the food, refusing moves that leave the board or hit the body.
-// Conservative about the tail, which only costs it the occasional legal move.
-function chooseDirection(state) {
-  const h = head(state);
-  const target = state.food === null ? h : state.food;
-  const dx = target.x - h.x;
-  const dy = target.y - h.y;
-  const horizontal = dx > 0 ? 'right' : dx < 0 ? 'left' : null;
-  const vertical = dy > 0 ? 'down' : dy < 0 ? 'up' : null;
-  const preferred = Math.abs(dx) >= Math.abs(dy)
-    ? [horizontal, vertical]
-    : [vertical, horizontal];
-  const order = [...preferred, ...directionNames].filter(
-    (d, i, all) => d !== null && all.indexOf(d) === i,
-  );
-
-  const occupied = new Set(state.snake.map(key));
-  for (const name of order) {
-    if (name === REVERSE[state.direction]) continue;
-    const [sx, sy] = STEP[name];
-    const nx = h.x + sx;
-    const ny = h.y + sy;
-    if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
-    if (occupied.has(nx + ',' + ny)) continue;
-    return name;
-  }
-  return state.direction; // cornered - keep going and take the death
-}
-
-function playTicks(state, count) {
-  let s = state;
-  for (let i = 0; i < count; i++) s = tick(enqueueTurn(s, chooseDirection(s)));
-  return s;
-}
+import {
+  WIDTH,
+  HEIGHT,
+  mulberry32,
+  at,
+  key,
+  head,
+  serpentine,
+  snapshot,
+  chooseDirection,
+  playTicks,
+} from './helpers.js';
 
 describe('the turn queue', () => {
   it('moves a right-moving snake up then left when both are given inside one tick, without ever entering its own neck', () => {

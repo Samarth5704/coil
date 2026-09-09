@@ -8,6 +8,14 @@
 const START_LENGTH = 4;
 const MAX_QUEUED_TURNS = 2;
 
+const SCORE_PER_FOOD = 10;
+const MIN_MULTIPLIER = 1;
+const MAX_MULTIPLIER = 5;
+const RAMP_STEPS = 4;
+const BASE_TICK_MS = 140;
+const TICK_STEP_MS = 6;
+const MIN_TICK_MS = 70;
+
 // The four directions live here rather than in src/core/directions.js. Four
 // vectors, an opposite table and one lookup is a paragraph, not a module.
 const STEP = {
@@ -174,6 +182,9 @@ export function createGame({ width = 24, height = 18, rng, snake, food } = {}) {
     turns: [],
     food: placed,
     foodEaten: 0,
+    // An accumulation, not a derivation — there is no way to recover it from
+    // a board, so unlike the multiplier and the reachable count it is stored.
+    score: 0,
     status: placed === null ? 'won' : 'playing',
     rng,
   });
@@ -268,6 +279,83 @@ export function tick(state) {
     turns,
     food,
     foodEaten: state.foodEaten + (ate ? 1 : 0),
+    // The multiplier is read from `state`, the board as it stood before the
+    // food was taken. Reading it from the board afterwards would pay out at
+    // the confinement the apple itself caused, not the confinement the player
+    // accepted in going for it.
+    score: state.score + (ate ? SCORE_PER_FOOD * multiplierFor(state) : 0),
     status: food === null ? 'won' : 'playing',
   });
+}
+
+// ---------------------------------------------------------------------------
+// Confinement, scoring and speed.
+//
+// All derived, all computed on demand, none of it stored. `tick` calls
+// multiplierFor above; function declarations hoist, so the order here is for
+// reading rather than for the loader.
+// ---------------------------------------------------------------------------
+
+// Free cells the head can reach by four-way adjacency, with the body blocking.
+// The tail is blocking only when it is about to be held — read from
+// tailHeldOnNextMove rather than restated, so this and `tick` cannot disagree
+// about which move that is.
+//
+// Iterative, with an explicit stack. A recursive fill would run one frame per
+// cell and overflow on any board of consequence.
+export function reachableFrom(state) {
+  const { width, height, snake } = state;
+  const size = width * height;
+
+  const blocked = new Uint8Array(size);
+  const tailHeld = tailHeldOnNextMove(state);
+  const last = snake.length - 1;
+  for (let i = 0; i < snake.length; i++) {
+    if (i === last && !tailHeld) continue; // vacates as the head arrives
+    blocked[snake[i].y * width + snake[i].x] = 1;
+  }
+
+  const seen = new Uint8Array(size);
+  const start = snake[0].y * width + snake[0].x;
+  seen[start] = 1; // the head's own cell is where we stand, not room we have
+  const stack = [start];
+  let count = 0;
+
+  while (stack.length > 0) {
+    const from = stack.pop();
+    const x = from % width;
+    const y = (from - x) / width;
+
+    if (x > 0) count += visit(from - 1, blocked, seen, stack);
+    if (x < width - 1) count += visit(from + 1, blocked, seen, stack);
+    if (y > 0) count += visit(from - width, blocked, seen, stack);
+    if (y < height - 1) count += visit(from + width, blocked, seen, stack);
+  }
+
+  return count;
+}
+
+function visit(at, blocked, seen, stack) {
+  if (seen[at] || blocked[at]) return 0;
+  seen[at] = 1;
+  stack.push(at);
+  return 1;
+}
+
+export function multiplierFor(state) {
+  const total = state.width * state.height;
+  const raw = 1 + Math.floor(((total - reachableFrom(state)) / total) * 4);
+  return raw < MIN_MULTIPLIER ? MIN_MULTIPLIER
+    : raw > MAX_MULTIPLIER ? MAX_MULTIPLIER
+      : raw;
+}
+
+export function tickIntervalFor(state) {
+  return Math.max(MIN_TICK_MS, BASE_TICK_MS - TICK_STEP_MS * state.foodEaten);
+}
+
+// Four ramp steps against five multipliers, so the top two share the last
+// one: by 4x the board is sealed enough that there is nothing louder to say.
+export function rampStepFor(state) {
+  return Math.min(RAMP_STEPS - 1, multiplierFor(state) - 1);
 }
