@@ -613,9 +613,17 @@ written down is a decision rather than an accident.
 deltas in, an intention out — and hold the three questions that gate
 `preventDefault`. `src/session.js` owns the board, the accumulator and the end
 of a run, with no DOM, so the game-over lifecycle and step mode are tested as
-logic. `src/ui/gameover.js`, `src/ui/dpad.js` and `src/ui/settings.js` are the
-nodes. `src/main.js` remains the only file that names `window` or
-`localStorage`, and the only place `preventDefault` is called.
+logic. `src/loop.js` turns frames into elapsed time and owns the pause; it
+takes its frame scheduler as an argument, which is the whole of its clock,
+because rAF hands its callback the timestamp and nothing in that file reads
+`Date.now()` or `performance.now()`. Injecting the scheduler therefore lets a
+test drive sixty ticks, a forty-second frame and a tab switch through the real
+loop without a browser — which is not a luxury: `requestAnimationFrame` does
+not fire in a preview pane that is not painting, so the timed loop cannot be
+observed there at all. `src/ui/gameover.js`, `src/ui/dpad.js` and
+`src/ui/settings.js` are the nodes. `src/main.js` remains the only file that
+names `window` or `localStorage`, and the only place `preventDefault` is
+called.
 
 The readout still owns the summary node, as it owns every node it writes; the
 game-over region is handed the string through an injected `writeSummary` so
@@ -652,6 +660,19 @@ Tests:
   new best against itself.
 - Arrow keys are not prevented once the run is over.
 - Tab is never prevented, in any state.
+- A fresh board left alone survives eleven ticks before the right-hand wall,
+  which is what "no input" looks like — not a board that dies on load.
+- The loop advances one tick per `tickIntervalFor(state)` of elapsed time
+  across sixty ticks, with the interval shrinking underneath it as food is
+  eaten. Driven through an injected frame scheduler.
+- A single forty-second frame advances only what the 250 ms clamp allows.
+- Going hidden stops the board, and returning does not replay the missed time.
+- The game-over region is not displayed before the first death. The fake DOM
+  has no cascade, so the assertion available is that index.html carries the
+  `[hidden] { display: none !important }` rule that outranks an author
+  `display` — named in the test as the weaker check it is.
+- The reduced-motion control's `label for` matches the select's `id`, so the
+  binding cannot be parted by a rename.
 
 ### Phase 7 — Audio
 

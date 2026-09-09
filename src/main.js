@@ -21,6 +21,7 @@
 import { createStore } from './store.js';
 import { load } from './persist.js';
 import { createSession } from './session.js';
+import { createLoop } from './loop.js';
 import { createRenderer, readPalette, drawOptionsFor } from './render/canvas.js';
 import {
   readoutStrings, gameOverSummary, nonWritableHint, createAriaLabeller,
@@ -64,9 +65,7 @@ createSettings({ root: panel, store });
 
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-let paused = document.visibilityState === 'hidden';
 let focused = false;
-let lastFrame = null;
 
 // The game-over region owns the button and where focus goes; the readout owns
 // the summary node, as it owns every node it writes, and is handed the string
@@ -144,7 +143,7 @@ function syncViews() {
   const state = session.state;
   readout.update(readoutStrings(state, { highScore: store.getState().highScore }));
 
-  const update = labeller.update(state, { paused });
+  const update = labeller.update(state, { paused: loop.isPaused() });
   // The label is written to the canvas exactly when the labeller says it
   // changed: at the start, at a pause, at a death and at the win. Never per
   // tick, and never into a live region.
@@ -155,33 +154,21 @@ function render(now = 0) {
   renderer.draw(session.state, { ...motionOptions(), focused, now });
 }
 
-// The frame loop. The session owns the accumulator and the fixed timestep; all
-// this does is hand it the wall clock that passed and draw the result. There
-// is no restart clock in here any more, and no branch that replaces a
-// finished board.
-function frame(now) {
-  window.requestAnimationFrame(frame);
-
-  if (lastFrame === null) lastFrame = now;
-  const delta = now - lastFrame;
-  lastFrame = now;
-
-  if (!paused) session.elapse(delta);
-
-  render(now);
-}
-
-function setPaused(next) {
-  if (paused === next) return;
-  paused = next;
-  // Time that passed while the tab was hidden is not time the player was
-  // playing, so the clock restarts from this frame rather than catching up.
-  lastFrame = null;
-  syncViews();
-}
+// The frame loop lives in src/loop.js, which takes its frame scheduler as an
+// argument. This is the only place the real one is named. rAF passes the
+// timestamp to its callback, so handing over the scheduler hands over the
+// clock, and the loop can be driven through 50 simulated ticks in a test
+// without a browser. There is no restart clock in it: a finished run stays
+// finished.
+const loop = createLoop({
+  requestFrame: (callback) => window.requestAnimationFrame(callback),
+  session,
+  render,
+  paused: document.visibilityState === 'hidden',
+});
 
 document.addEventListener('visibilitychange', () => {
-  setPaused(document.visibilityState === 'hidden');
+  if (loop.setPaused(document.visibilityState === 'hidden')) syncViews();
 });
 
 // One keydown listener, on the document, and the ONLY preventDefault in the
@@ -239,4 +226,4 @@ store.subscribe(syncViews);
 
 resize();
 syncViews();
-window.requestAnimationFrame(frame);
+loop.start();

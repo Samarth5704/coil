@@ -121,6 +121,25 @@ describe('the timed loop', () => {
   });
 });
 
+describe('a fresh board left alone', () => {
+  it('survives eleven ticks before the wall, rather than dying on the spot', () => {
+    // Pinned because a summary reading "final score 0, length 4" was mistaken
+    // for a board that dies immediately. It does not: the starting snake is
+    // four segments facing right with its head at x=13 on a 24-wide board, so
+    // it has eleven moves before the wall at 140 ms each, and 1540 ms of it.
+    // Nothing about this is input-dependent, which is why it is worth a name.
+    const { session } = makeSession();
+    expect(session.state.snake[0]).toEqual({ x: 13, y: 9 });
+    expect(session.state.direction).toBe('right');
+
+    const dead = playToDeath(session);
+
+    expect(session.ticks).toBe(11);
+    expect(dead.status).toBe('dead');
+    expect(dead.snake.length).toBe(4);
+  });
+});
+
 describe('the end of a run', () => {
   it('calls submitScore exactly once, with the final score', () => {
     const store = makeStore();
