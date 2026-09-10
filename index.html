@@ -321,8 +321,15 @@
          reader and a board with no visible way in is one the visitor has to
          guess at. The identical sentence is in IDLE_INSTRUCTION in
          src/render/labels.js, which the canvas aria-label uses; a test pins
-         the two together. -->
-    <p class="idle" data-role="idle" id="idle">Press an arrow key or W, A, S or D to start — or swipe the board, or use the arrow buttons.</p>
+         the two together.
+
+         It names the keyboard and the swipe and NOT the arrow buttons,
+         because this markup is parsed before any script has run and the
+         buttons are behind a media query. Where the d-pad is actually on
+         screen, src/ui/idle.js rewrites this line to the form that names it.
+         An instruction that lists a control the reader does not have sends
+         them looking for something that is not there. -->
+    <p class="idle" data-role="idle" id="idle">Press an arrow key or W, A, S or D to start — or swipe the board.</p>
 
     <!-- The game-over state. It stays until the player leaves it: phase 5's
          auto-restart timer is gone, and it is gone because it took this
@@ -368,9 +375,14 @@
            game and this session must not write over it. -->
       <p class="hint" data-field="hint" id="hint" hidden></p>
 
-      <p class="note">
-        Sound is saved now and synthesised in phase 7; nothing plays yet.
-      </p>
+      <!-- The other honest line, and it sits here rather than anywhere else
+           because it is about the sound toggle three rows up. On iOS, Web
+           Audio plays on the ambient channel, which the hardware ringer
+           switch silences; navigator.audioSession is the API that moves it
+           off that channel, and where the browser has not got it there is
+           nothing this code can do. So it says so, rather than claiming to
+           have handled it. Shown only where the API is genuinely absent. -->
+      <p class="hint" data-field="ringer" id="ringer" hidden></p>
     </section>
   </div>
 </div>

@@ -155,6 +155,9 @@ export function readoutMarkup() {
   }
   root.appendChild(new FakeElement('p', { 'data-field': 'summary', class: 'visually-hidden' }));
   root.appendChild(new FakeElement('p', { 'data-field': 'hint', hidden: '' }));
+  // The second honest line: iOS and the ringer switch. Its own node, as in
+  // index.html, because either hint can be showing without the other.
+  root.appendChild(new FakeElement('p', { 'data-field': 'ringer', hidden: '' }));
   return root;
 }
 
@@ -225,7 +228,10 @@ export function appMarkup() {
   // are moved rather than duplicated. One node, one owner.
   const summary = readout.querySelector('[data-field="summary"]');
   const hint = readout.querySelector('[data-field="hint"]');
-  readout.children = readout.children.filter((c) => c !== summary && c !== hint);
+  const ringer = readout.querySelector('[data-field="ringer"]');
+  readout.children = readout.children.filter(
+    (c) => c !== summary && c !== hint && c !== ringer,
+  );
   panel.appendChild(readout);
 
   const idle = doc.createElement('p');
@@ -259,6 +265,7 @@ export function appMarkup() {
   select.value = 'system';
   settings.appendChild(select);
   settings.appendChild(hint);
+  settings.appendChild(ringer);
   panel.appendChild(settings);
 
   const dpad = doc.createElement('div');

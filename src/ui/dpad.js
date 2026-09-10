@@ -13,6 +13,18 @@
 //
 // The 44 px minimum target is CSS, in index.html, on `.dpad button`.
 
+/**
+ * The media query that decides whether the d-pad is on screen at all.
+ *
+ * index.html's stylesheet shows `.dpad` under exactly this query and hides it
+ * otherwise, and main.js matches the same string to decide whether the idle
+ * instruction may name these buttons. Named once, here, because the sentence
+ * that tells a player to press a button and the rule that puts the button on
+ * the page have to agree, and two copies of a media query drift the same way
+ * two copies of a sentence do. tests/markup.test.js pins this to the CSS.
+ */
+export const DPAD_MEDIA_QUERY = '(pointer: coarse)';
+
 export const DPAD_BUTTONS = Object.freeze([
   { direction: 'up', glyph: '▲', label: 'Steer the snake up' },
   { direction: 'left', glyph: '◀', label: 'Steer the snake left' },

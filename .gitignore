@@ -2,3 +2,9 @@ node_modules/
 .DS_Store
 *.log
 .vitest/
+
+# Agent/editor state that is per-machine. .claude/launch.json is NOT ignored:
+# it is the one repo-specific answer to "how do I run this", and a project with
+# no build step has nowhere else to put it.
+.claude/settings.local.json
+.claude/*.local.json

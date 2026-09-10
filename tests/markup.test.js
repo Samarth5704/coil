@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { IDLE_INSTRUCTION } from '../src/render/labels.js';
+import { DPAD_MEDIA_QUERY } from '../src/ui/dpad.js';
 import { createGameOver } from '../src/ui/gameover.js';
 import { createReadout } from '../src/ui/readout.js';
 import { appMarkup } from './fake-dom.js';
@@ -127,6 +128,18 @@ describe('the idle instruction is one sentence, written once', () => {
     expect(node[1].trim()).toBe(IDLE_INSTRUCTION);
   });
 
+  it('names no control the page may not be showing', () => {
+    // PHASE 7 CARRY-OVER. This sentence used to name the arrow buttons
+    // unconditionally, and the d-pad is behind a media query - so a desktop
+    // visitor was told to use a control that was not on their screen, and a
+    // screen reader user was told about buttons that were display:none and
+    // therefore not in the tree to find. The markup is parsed before any
+    // script has run, so the copy in it can only be the form that is true on
+    // every device; src/ui/idle.js rewrites it where the d-pad is displayed.
+    const node = html.match(/<p[^>]*data-role="idle"[^>]*>([\s\S]*?)<\/p>/);
+    expect(node[1]).not.toMatch(/button/i);
+  });
+
   it('is visible on load, because it is not marked hidden in the markup', () => {
     // The board is idle when the page arrives, so the way in is on screen
     // before any script has run.
@@ -165,6 +178,46 @@ describe('the reduced-motion control has a label bound to it', () => {
       const label = tagFor(new RegExp(`<label[^>]*for="${input.id}"[^>]*>`));
       expect(label, `no <label for="${input.id}"> bound to the ${setting} control`)
         .not.toBe(null);
+    }
+  });
+});
+
+describe('the d-pad media query is written once', () => {
+  it('is the string src/ui/dpad.js exports, and it is what the stylesheet uses', () => {
+    // The sentence that tells a player to press a button and the rule that
+    // puts the button on the page have to agree about whether it is there.
+    // Two copies of a media query drift exactly the way two copies of a
+    // sentence do, so main.js matches this string through matchMedia and the
+    // stylesheet below is asserted to carry the same one.
+    const withoutComments = styleBlock.replace(/\/\*[\s\S]*?\*\//g, '');
+    // An at-rule holding flat rules and nothing nested deeper, which is every
+    // media block in this stylesheet.
+    const blocks = [
+      ...withoutComments.matchAll(/@media\s*([^{]+)\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g),
+    ];
+    const dpadBlocks = blocks.filter((block) => /\.dpad\s*\{/.test(block[2]));
+
+    expect(dpadBlocks, 'no media block showing the d-pad').toHaveLength(1);
+    expect(dpadBlocks[0][1].trim()).toBe(DPAD_MEDIA_QUERY);
+    expect(dpadBlocks[0][2]).toMatch(/display\s*:\s*grid/);
+  });
+
+  it('leaves the d-pad hidden outside that query, which is why the sentence is conditional', () => {
+    const dpad = rules.find((rule) => rule.selector === '.dpad');
+    expect(dpad, 'no .dpad rule').toBeTruthy();
+    expect(dpad.body).toMatch(/display\s*:\s*none/);
+  });
+});
+
+describe('the two honest lines each have a node to be written into', () => {
+  it('carries a hint node for the unwritable save and one for the iOS ringer switch', () => {
+    // Separate nodes, because either can be showing without the other, and
+    // both start hidden: an empty hint is not a hint, and a node emptied
+    // rather than hidden stays in the accessibility tree saying nothing.
+    for (const field of ['hint', 'ringer']) {
+      const tag = html.match(new RegExp('<p[^>]*data-field="' + field + '"[^>]*>'));
+      expect(tag, 'no ' + field + ' node in index.html').not.toBe(null);
+      expect(tag[0]).toMatch(/\shidden[\s>]/);
     }
   });
 });

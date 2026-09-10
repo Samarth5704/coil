@@ -625,8 +625,40 @@ the snake carries on right, and they blame the game rather than the design. In
 step mode the same press starts the run and advances exactly one tick, because
 step mode has no clock and a first press that moves nothing has done nothing.
 
-The keys that only advance — space and enter — do not leave idle. Steering is
-what starts a game; there is nothing yet to advance.
+##### Space and enter do not leave idle, and that is a decision
+
+The keys that only advance — space and enter — do **not** leave idle. Steering
+is what starts a game; there is nothing yet to advance.
+
+This is recorded here as a decision rather than left to be read as an
+oversight, because it looks like one. Space and enter are the two keys that
+mean "go" everywhere else on a page, a reviewer will expect at least one of
+them to start the board, and the obvious fix — have them call `begin()` — is
+two lines. So the reasoning:
+
+An advance key advances the board along its current heading. On an idle board
+that heading is the starting one, pointing right, and the board has never
+moved. A space that started the run would therefore start it by moving the
+snake one cell toward the right-hand wall — which is a move the player did not
+choose, in a direction they were not asked about, on a board whose whole
+purpose in existing is that it does not move until they say so. Idle is there
+because a board that plays itself is over eleven ticks after it appears; a
+board that plays itself for one tick on a keypress is the same mistake at a
+smaller scale.
+
+There is also nothing for it to mean. Step mode's contract is one tick per
+press, and the first press has to be a *directional* one in every mode from
+every source, so that it is applied as the first turn rather than swallowed by
+the transition. An advance key has no direction to apply. It would be a press
+that starts the game and steers nothing, which is exactly the dropped-input
+feeling the "applied as the first turn" rule exists to prevent.
+
+So the gate is on `acted`, in `applyKey`: `action.advance` ticks the board only
+once the board has been started, and only a direction starts it. `interpretKey`
+still returns `advance: true` for those keys while idle — it answers what the
+key means, not what the session should do with it — and the session declines.
+The session is where the lifecycle lives, and that is the one place that
+question is answered.
 
 **over** — a finished run. It stays finished; see "Removing phase 5's
 auto-restart" above. The restart button is the only way out, and it returns to
@@ -678,6 +710,40 @@ because it is said twice — as text on the page and inside the canvas
 aria-label for the idle phase — and two copies of a sentence drift. `src/main.js` remains the only file that
 names `window` or `localStorage`, and the only place `preventDefault` is
 called.
+
+##### The idle instruction names only what is on screen
+
+The sentence originally named all three ways in unconditionally — keyboard,
+swipe, and the arrow buttons — on the reasoning that the page has all three and
+cannot know which the visitor will use. That was wrong about the third. The
+d-pad is displayed only under `@media (pointer: coarse)`, so a desktop visitor
+was told to use a control that is not on their screen, and a screen reader user
+was told about buttons that are `display: none` and therefore not in the
+accessibility tree to find. An instruction listing a control the reader does
+not have is worse than one that leaves a control unmentioned: it sends them
+looking for something that is not there.
+
+So the sentence has two forms, and they are one sentence with a clause swapped
+rather than two sentences maintained apart:
+
+- `IDLE_INSTRUCTION` — keyboard and swipe. True on every device, and the copy
+  in `index.html`, because that markup is parsed before any script has run and
+  can therefore only be the form that is true everywhere.
+- `IDLE_INSTRUCTION_WITH_DPAD` — the same, plus the arrow buttons.
+
+`idleInstructionFor({ dpadVisible })` picks between them, against
+`DPAD_MEDIA_QUERY` — one string, exported from `src/ui/dpad.js`, matched in
+`main.js` through `matchMedia` and pinned to the stylesheet by
+`tests/markup.test.js`. Two copies of a media query drift exactly the way two
+copies of a sentence do.
+
+`src/ui/idle.js` rewrites the node's text on every `show()` rather than
+trusting the markup, because a hybrid laptop gains a coarse pointer the moment
+a finger touches the screen and the d-pad appears with it. The board is still
+idle when that happens, so the labeller sees no phase change and would keep the
+sentence it was born with while the page under it swapped — hence
+`labeller.invalidate()`, which is called from that one media-query handler and
+from nowhere else.
 
 The readout still owns the summary node, as it owns every node it writes; the
 game-over region is handed the string through an injected `writeSummary` so
@@ -747,11 +813,163 @@ Tests:
 
 `src/audio/rtttl.js` parses RTTTL from its published specification, written
 from scratch. `src/audio/synth.js` plays parsed notes as square waves through a
-bandpass chain, with 2–3 ms ramps.
+bandpass chain, with 2–3 ms ramps. `src/audio/sounds.js` is the table.
+`src/audio/cues.js` is the mapping from a thing that happened on the board to a
+string in that table — separated from the synth because it is the half with
+decisions in it, and the only half that can be tested without a browser.
 
 Sounds: eat, turn, death, new high score, and the per-tick pulse whose pitch is
 derived from the ramp step. All defined as RTTTL strings in one data file, so
 every sound in the game is data rather than code.
+
+#### The pitches, and why they are where they are
+
+| Sound   | RTTTL                             | Pitches                        |
+|---------|-----------------------------------|--------------------------------|
+| eat     | `eat:d=32,o=6,b=180:c7,g7`        | C7 2093, G7 3136 — 42 ms each  |
+| turn    | `turn:d=32,o=7,b=355:c`           | C7 2093 — 21 ms                |
+| death   | `death:d=16,o=6,b=125:c,a5,f5,8c5`| C6, A5, F5, C5 — 600 ms total  |
+| best    | `highscore:d=16,o=6,b=160:c,e,g,8c7` | C6, E6, G6, C7 — 469 ms     |
+| pulse 0 | `pulse0:d=32,o=5,b=355:a`         | A5 880 — calm                  |
+| pulse 1 | `pulse1:d=32,o=6,b=355:c`         | C6 1046.5 — close              |
+| pulse 2 | `pulse2:d=32,o=6,b=355:e`         | E6 1318.5 — tight              |
+| pulse 3 | `pulse3:d=32,o=6,b=355:a`         | A6 1760 — hot                  |
+| pulse 4 | `pulse4:d=32,o=7,b=355:c`         | C7 2093 — sealed               |
+
+Two constraints, both physical, decided these:
+
+The voices run through the piezo chain — a 400 Hz highpass and a 3.8 kHz
+lowpass — so anything written below about 500 Hz is attenuated to nothing.
+Octave 4, which the format permits, is therefore where notes go to be
+inaudible, and every pitch above sits between 523 Hz and 2093 Hz. A test
+iterates the exported table and asserts it.
+
+Every tempo above is one of the format's 32 permitted values. `b=120` — the
+obvious tempo, and not one of them — snaps to 125, and the sound would then be
+timed against a number nobody wrote down. The parser's own test fixtures were
+written against 120 first and this is how it was found.
+
+The pulse climbs an A minor shape across two octaves rather than stepping by
+semitones, so consecutive ramp steps are far enough apart to be told apart by
+ear rather than merely measured apart in hertz. This is the sound half of the
+confinement signal: the colour says it to a player who can separate 1.12:1, the
+readout says it in words, and this says it to a player who is looking at the
+board rather than at the panel.
+
+#### The tie in the BPM snap resolves downward
+
+A tempo equidistant from two permitted values — 106, between 100 and 112 —
+takes the **lower**. Both neighbours are equally wrong by the only measure
+there is, so the rule is decided rather than left to fall out of the direction
+the table happens to be walked. Lower means a note comes out slightly longer
+than its author asked for, which keeps a short cue audible rather than clipping
+it, and every sound in this game is under 600 ms.
+
+#### What is tested, and what is not
+
+The parser is logic and is tested properly: 36 named cases in
+`tests/rtttl.test.js`.
+
+`tests/audio.test.js` covers the audio edge in four parts, against the fake in
+`tests/fake-audio.js`, which records automation calls rather than synthesising:
+
+1. **When a context gets constructed.** Never at module load, never across ten
+   seconds of frames on an idle board, never on a request to play. Exactly one
+   on the first `unlock()`, and a suspended one is resumed rather than
+   replaced.
+2. **Whether a sound is scheduled at all.** Muted, hidden, or before the first
+   gesture, nothing is — and muting stops what is already sounding at the mute
+   rather than at the end of the note.
+3. **The envelope contract**, on every voice of every cue:
+   - a ramp up from zero at the onset, reaching peak exactly `RAMP_MS` later;
+   - a ramp back to zero ending at `startAt + hold`, held at peak until
+     `RAMP_MS` before that, with `stop()` scheduled no earlier than the bottom
+     of that ramp;
+   - each oscillator started exactly once across a run of fifteen notes — the
+     fake throws on a second `start()` the way the real node does, so reuse
+     fails at the call site as well as at the assertion;
+   - each voice reaching the destination through the highpass and *then* the
+     lowpass, at the frequencies this document names. A lowpass before a
+     highpass is the same pair of filters and a different sound.
+   - a rest builds no oscillator and still occupies its time.
+   This is the whole contract rather than the release alone. A suite pinning
+   only the release would imply the graph was covered while the onset, the
+   single-use rule and the filter order were not — which is the failure mode
+   the earlier "not tested" note was trying to avoid and did not.
+4. **The sound table**, iterated from its actual export: every string parses,
+   every pitch clears the piezo chain, every ramp step has its own pulse, and
+   every name is inside the format's ten-character cap.
+
+**What is still not covered, named so it is not mistaken for coverage.** The
+fake records; it does not synthesise. Nothing in this suite can say that a
+square wave was audible, that 2.5 ms is long enough to remove the click on real
+hardware rather than merely being scheduled, or that the chain sounds like a
+small speaker rather than only being wired like one. Those are ear questions
+and they were answered by listening. Nor is the timed tick cadence covered in a
+browser: `requestAnimationFrame` does not fire in a preview pane that is not
+painting, so the per-tick pulse under the real loop was verified through step
+mode, which advances without a clock.
+
+#### The ringer hint is gated on the platform and on the toggle
+
+The line is shown only when all three hold: the browser has no
+`navigator.audioSession`, the platform is plausibly iOS or iPadOS, and sound is
+currently on.
+
+The first condition alone was the original gate and it was wrong. Absence of
+`navigator.audioSession` means "not Safari 17 or later", not "iOS", so every
+desktop Chromium and Firefox was being warned about a hardware switch its
+machine does not have. **A hint shown to everyone is furniture, and a hint
+shown to the wrong platform is worse than silence — it is the reason the next
+one gets skipped.** The same standard the ramp-name and the unwritable-save
+lines are held to: say what is true for this reader, on this page, or do not
+say it.
+
+`plausiblyIosAudio` in `src/audio/synth.js` is the platform test, from feature
+probes rather than a user-agent string, and it needs two terms:
+
+- **touch** — `navigator.maxTouchPoints > 0`. macOS Safari reports 0; iPadOS
+  reports 5 while claiming to be a Mac everywhere else.
+- **Apple** — `window.GestureEvent`, which exists only in the WebKit family, or
+  `CSS.supports('-webkit-touch-callout', 'none')`, which mobile WebKit
+  supports and macOS Safari does not. Either will do.
+
+Both terms are necessary and each covers the other's blind spot: macOS Safari
+passes Apple and fails touch; a touchscreen Windows laptop or an Android tablet
+passes touch and fails Apple.
+
+It **cannot** tell an iPhone from an iPad and does not try — both have the
+problem, hardware switch or Control Centre toggle. It cannot tell whether the
+switch is actually silent, which no browser exposes, which is why the line says
+*may*. It does not survive a browser spoofing WebKit's non-standard surface,
+and it does not need to: a false positive costs one line of text. And it is a
+proxy throughout — it observes the shape of the browser and infers the
+platform; it never observes the audio session.
+
+**Uncertain means no.** Every probe absent returns false.
+
+The third condition is read live, so switching sound off takes the line off the
+page and switching it back on returns it. With sound off there is nothing for a
+ringer switch to be silencing, and the line is answering a question the player
+is not asking.
+
+#### The context is built on a gesture, and there is always one
+
+`createAudio` constructs nothing. `unlock()` does, and it is called only from
+inside a real gesture handler — keydown, pointerdown on the play surface, a
+d-pad press, the sound toggle's own change event. `AudioContext` and
+`navigator.audioSession` are named in `src/main.js` and passed in as arguments,
+which is what lets a test spy on the constructor.
+
+Phase 6's idle board is what guarantees a gesture exists: the player has to
+steer to begin, so there is always a real press behind the first sound. This is
+the second thing the idle state bought, and it was not the reason it was added.
+
+Muting silences immediately — every live voice has its automation cancelled, is
+ramped down over the same 2.5 ms as a normal release, and is stopped at the
+bottom of that ramp. A mute that waits for the current note is late by up to
+600 ms, which is the death cue: the sound a player is most likely to reach for
+the toggle during.
 
 **Stop point:** sound works, mutes cleanly, and survives a tab switch. Stop.
 
@@ -768,7 +986,25 @@ Tests:
   nearest permitted value, and the choice is recorded in a comment.
 - A malformed note returns a parse error rather than a silent `NaN` frequency.
 - No `AudioContext` is constructed before the first gesture, asserted with a
-  spy.
+  spy — during module load, and across ten seconds of frames on an idle board.
+- Every string in the table `src/audio/sounds.js` exports parses without
+  throwing, iterating the actual export so a sound added with a typo in it
+  fails the suite rather than failing silently in a browser.
+- Every pitch in that table is inside the piezo chain's passband, so a sound
+  written into octave 4 out of habit is caught rather than played to nobody.
+- Every voice ramps from zero to peak over `RAMP_MS` at its onset.
+- Every voice ramps back to zero ending at `startAt + hold`, and is stopped no
+  earlier than the bottom of that ramp. **This is the case that fails when the
+  release is removed**, with the message "the voice does not ramp back to
+  silence".
+- No oscillator is started twice, across a run of fifteen notes.
+- Every voice reaches the destination through the highpass and then the
+  lowpass, at 400 Hz and 3.8 kHz.
+- The ringer hint is shown when the browser lacks `audioSession` **and** the
+  platform is plausibly iOS **and** sound is on; and is absent when any one of
+  those fails — asserted for desktop Chrome, desktop Safari, a touchscreen
+  Windows laptop, a browser that has `audioSession`, sound switched off, and a
+  probe that says nothing at all.
 
 ### Phase 8 — Delivery
 

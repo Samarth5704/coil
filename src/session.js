@@ -102,9 +102,16 @@ export function createSession({
   // One tick, wherever it came from: the accumulator or a keypress.
   function advance() {
     if (!playable()) return false;
+    const previous = state;
     const before = state.status;
     state = tick(state);
     ticks++;
+    // The tick is reported only while the board is still playing. A tick that
+    // ended the run is reported by `ended` instead, so the run's last moment
+    // is one piece of news rather than two - phase 7 hangs the per-tick pulse
+    // and the death cue on these, and a board that fired both would play a
+    // pulse underneath its own death.
+    if (state.status === 'playing') view.ticked?.(state, previous);
     if (state.status !== before && state.status !== 'playing' && !ended) endRun();
     return true;
   }
@@ -140,7 +147,14 @@ export function createSession({
   }
 
   function turn(direction) {
+    const previous = state;
     state = enqueueTurn(state, direction);
+    // enqueueTurn returns the state it was given when it refuses - a reversal,
+    // a full queue, a finished board - so identity is what separates a turn
+    // that was taken from one that was not. Phase 7 hangs the turn cue on
+    // this, and a cue that fired on a refused press would be telling the
+    // player their input landed when it did not.
+    if (state !== previous) view.turned?.(state, direction);
   }
 
   /**

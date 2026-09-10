@@ -16,7 +16,11 @@ import { createReadout } from '../src/ui/readout.js';
 import { createSession, MAX_FRAME_MS } from '../src/session.js';
 import { createStore } from '../src/store.js';
 import { STORAGE_KEY, defaultRecord } from '../src/persist.js';
-import { gameOverSummary, IDLE_INSTRUCTION } from '../src/render/labels.js';
+import {
+  gameOverSummary, IDLE_INSTRUCTION, IDLE_INSTRUCTION_WITH_DPAD,
+  idleInstructionFor, ariaLabelFor, createAriaLabeller,
+} from '../src/render/labels.js';
+import { createGame } from '../src/core/game.js';
 import { appMarkup } from './fake-dom.js';
 import { createFakeStorage, mulberry32, WIDTH, HEIGHT } from './helpers.js';
 
@@ -136,5 +140,100 @@ describe('focus while idle', () => {
 
     expect(app.session.lifecycle).toBe('over');
     expect(app.doc.activeElement).toBe(app.gameOver.button);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7 carry-over — the instruction names what is actually on screen.
+//
+// The sentence used to name the arrow buttons unconditionally. The d-pad is
+// displayed only under `@media (pointer: coarse)`, so a desktop visitor was
+// told to use a control that was not on their page — and for a screen reader
+// user, told about buttons that were `display: none` and therefore not in the
+// accessibility tree to find. An instruction that lists a control the reader
+// does not have is worse than one that leaves a control unmentioned: it sends
+// them looking.
+
+describe('the idle instruction names only the controls that are on screen', () => {
+  it('leaves the arrow buttons out where the d-pad is not displayed', () => {
+    expect(idleInstructionFor({ dpadVisible: false })).toBe(IDLE_INSTRUCTION);
+    expect(IDLE_INSTRUCTION).not.toMatch(/button/i);
+    // The two ways in that every visitor has, on every device.
+    expect(IDLE_INSTRUCTION).toMatch(/arrow key/i);
+    expect(IDLE_INSTRUCTION).toMatch(/swipe/i);
+  });
+
+  it('names them where it is', () => {
+    const withDpad = idleInstructionFor({ dpadVisible: true });
+
+    expect(withDpad).toBe(IDLE_INSTRUCTION_WITH_DPAD);
+    expect(withDpad).toMatch(/arrow buttons/i);
+  });
+
+  it('defaults to the form without them, which is the form in the markup', () => {
+    // No argument is the safe answer: a caller that has not decided has not
+    // established that the buttons are there, and the markup the browser parses
+    // before any script runs can only be this form.
+    expect(idleInstructionFor()).toBe(IDLE_INSTRUCTION);
+  });
+
+  it('says the same thing about the keyboard and the swipe in both forms', () => {
+    // One sentence with a clause swapped, not two sentences maintained apart.
+    const shared = IDLE_INSTRUCTION.replace(/\.$/, '');
+    expect(IDLE_INSTRUCTION_WITH_DPAD.startsWith(shared)).toBe(true);
+  });
+
+  it('is one sentence either way', () => {
+    for (const text of [IDLE_INSTRUCTION, IDLE_INSTRUCTION_WITH_DPAD]) {
+      expect(text.match(/\./g)).toHaveLength(1);
+      expect(text.endsWith('.')).toBe(true);
+    }
+  });
+
+  it('puts the form the page is showing on the node, not the form in the markup', () => {
+    // The note rewrites its own text on every show, because whether the d-pad
+    // is displayed is a media query and a media query can change without the
+    // page reloading.
+    const markup = appMarkup();
+    let coarse = false;
+    const note = createIdleNote({
+      root: markup.panel,
+      instruction: () => idleInstructionFor({ dpadVisible: coarse }),
+    });
+
+    note.show();
+    expect(markup.idle.textContent).toBe(IDLE_INSTRUCTION);
+
+    coarse = true;
+    note.show();
+    expect(markup.idle.textContent).toBe(IDLE_INSTRUCTION_WITH_DPAD);
+  });
+
+  it('gives the canvas the same form the page is showing', () => {
+    // Two descriptions of one board is the drift the single source exists to
+    // prevent, and it would be invisible: the person reading the page and the
+    // person hearing the label are never the same person.
+    const state = createGame({ width: WIDTH, height: HEIGHT, rng: () => 0.5 });
+
+    expect(ariaLabelFor(state, { idle: true })).toContain(IDLE_INSTRUCTION);
+    expect(ariaLabelFor(state, { idle: true, dpadVisible: true }))
+      .toContain(IDLE_INSTRUCTION_WITH_DPAD);
+  });
+
+  it('lets the labeller rewrite when the pointer changes but the phase does not', () => {
+    // A hybrid laptop gains a coarse pointer the moment a finger touches the
+    // screen. The board is still idle, so nothing about the phase changed, and
+    // without invalidate() the label would keep the sentence it was born with
+    // while the page under it swapped.
+    const state = createGame({ width: WIDTH, height: HEIGHT, rng: () => 0.5 });
+    const labeller = createAriaLabeller();
+
+    expect(labeller.update(state, { idle: true }).label).toContain(IDLE_INSTRUCTION);
+    expect(labeller.update(state, { idle: true, dpadVisible: true }).changed).toBe(false);
+
+    labeller.invalidate();
+    const again = labeller.update(state, { idle: true, dpadVisible: true });
+    expect(again.changed).toBe(true);
+    expect(again.label).toContain(IDLE_INSTRUCTION_WITH_DPAD);
   });
 });

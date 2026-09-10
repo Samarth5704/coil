@@ -58,10 +58,29 @@ cells three device pixels wide and others four, and it is the single most
 visible way a pixel-grid game looks wrong. `imageSmoothingEnabled = false`.
 
 **Audio.** 2–3 ms gain ramp at onset and release on every note or it clicks.
-One oscillator per note; they are single-use. Construct the `AudioContext` on
-the first real user gesture, not on page load. Feature-detect
-`navigator.audioSession`; where absent, show an honest hint that the iOS ringer
-switch may be silencing the game rather than pretending it is handled.
+The release is the one that gets left out, because a note that starts cleanly
+sounds correct right up until it stops — `tests/audio.test.js` pins the whole
+envelope, and "ramps back to zero ending at startAt + hold, and stops no
+earlier" is the case that fails if it goes. One oscillator per note; they are
+single-use, and the fake throws on a second `start()` the way the real node
+does. Construct the `AudioContext` on the first real user gesture, not on page
+load — `createAudio` builds nothing and `unlock()` is called only from inside a
+gesture handler.
+
+**The iOS ringer hint is gated on three conditions, not one.** No
+`navigator.audioSession`, **and** a platform that is plausibly iOS
+(`plausiblyIosAudio` — touch points plus an Apple/WebKit feature probe, never a
+UA string), **and** sound currently on. Absence of `audioSession` means "not
+Safari 17+", not "iOS": gating on it alone warned every desktop Chromium and
+Firefox about a switch its machine does not have. Uncertain means do not show
+it.
+
+Every sound is an RTTTL string in `src/audio/sounds.js`, so sound is data. Every
+pitch must clear the piezo chain — a 400 Hz highpass and a 3.8 kHz lowpass — so
+octave 4 is inaudible however legal it is, and every tempo must be one of the
+format's 32 permitted values or the parser snaps it to one nobody wrote down.
+Both are asserted over the exported table. Muting silences what is already
+sounding, not the note after it.
 
 **Persistence.** Versioned from the first write, with `migrate()`. Loading
 validates and falls back to defaults. An unknown future version is left
@@ -100,6 +119,12 @@ destroys focus and selection and thrashes layout.
   are excluded by name, never by threshold.
 - The canvas gets a one-sentence `aria-label` updated on state transitions
   only. **Never put a per-tick value in an aria-live region.**
+- **Never name a control the page may not be showing.** The idle instruction
+  names the arrow buttons only where `DPAD_MEDIA_QUERY` matches, because the
+  d-pad is behind that query; an instruction listing a control the reader does
+  not have sends them looking for something that is not there. Same rule as the
+  ramp needing its name in text — say what is true for this reader, on this
+  page, or do not say it.
 - `prefers-reduced-motion` removes flicker, ramp cross-fade and the death
   animation. It never removes the snake's motion — that motion is the
   information.

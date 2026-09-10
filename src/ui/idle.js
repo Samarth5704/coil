@@ -11,9 +11,17 @@
 // idle phase, and tests/markup.test.js pins the two to one string in
 // src/render/labels.js so they cannot drift apart.
 
-export function createIdleNote({ root } = {}) {
+// The sentence in the markup is the form that is true on every device, because
+// the markup is parsed before any script has run. `instruction` is asked again
+// on every show, so a page whose d-pad has appeared says so.
+import { IDLE_INSTRUCTION } from '../render/labels.js';
+
+export function createIdleNote({ root, instruction = () => IDLE_INSTRUCTION } = {}) {
   if (!root || typeof root.querySelector !== 'function') {
     throw new TypeError('createIdleNote needs a root element to look its node up in');
+  }
+  if (typeof instruction !== 'function') {
+    throw new TypeError('createIdleNote needs instruction to be a function, asked on each show');
   }
 
   const node = root.querySelector('[data-role="idle"]');
@@ -25,6 +33,11 @@ export function createIdleNote({ root } = {}) {
 
   return {
     show() {
+      // Rewritten each time rather than trusted from the markup: which
+      // controls are on screen is a media query, and a media query can change
+      // between one idle board and the next without the page reloading.
+      const text = instruction();
+      if (node.textContent !== text) node.textContent = text;
       node.removeAttribute('hidden');
       shown = true;
     },

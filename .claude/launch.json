@@ -1,0 +1,12 @@
+{
+  "//": "How to run Coil locally. There is no build step and no dev server to build: this serves the repo as static files, which is exactly what GitHub Pages will do in phase 8. Committed rather than ignored - it is repo-specific, holds no secrets and no absolute paths, and in a project whose whole premise is that index.html is the file the browser loads, 'how do I load it' is worth writing down once.",
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "coil",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "serve", "-l", "4173", "."],
+      "port": 4173
+    }
+  ]
+}

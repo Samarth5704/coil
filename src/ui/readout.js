@@ -37,6 +37,10 @@ export function createReadout({ root } = {}) {
   for (const field of FIELDS) nodes[field] = requireNode(root, field);
   const summaryNode = requireNode(root, 'summary');
   const hintNode = requireNode(root, 'hint');
+  // The second honest line: iOS, the ringer switch, and the API this browser
+  // does not have. Its own node rather than sharing the first one, because the
+  // two are unrelated and either can be showing without the other.
+  const ringerNode = requireNode(root, 'ringer');
 
   // Last value written per field, so an unchanged string is not written again.
   // An untouched text node is one the browser does not re-lay-out and one a
@@ -69,20 +73,29 @@ export function createReadout({ root } = {}) {
   // One honest line, or nothing. Hidden by the hidden attribute rather than by
   // emptying it, so it is out of the accessibility tree as well as out of
   // sight when there is nothing to say.
-  function setHint(text) {
-    if (text === null || text === undefined || text === '') {
-      hintNode.textContent = '';
-      hintNode.setAttribute('hidden', '');
-      written.hint = '';
-      return;
-    }
-    const value = String(text);
-    if (written.hint !== value) {
-      written.hint = value;
-      hintNode.textContent = value;
-    }
-    hintNode.removeAttribute('hidden');
+  //
+  // Written once and shared by both hints rather than twice: they differ only
+  // in which node they write, and a copied setter is a setter that gets fixed
+  // in one place.
+  function hintSetter(node, key) {
+    return function setText(text) {
+      if (text === null || text === undefined || text === '') {
+        node.textContent = '';
+        node.setAttribute('hidden', '');
+        written[key] = '';
+        return;
+      }
+      const value = String(text);
+      if (written[key] !== value) {
+        written[key] = value;
+        node.textContent = value;
+      }
+      node.removeAttribute('hidden');
+    };
   }
 
-  return { update, setSummary, setHint, nodes, fields: FIELDS };
+  const setHint = hintSetter(hintNode, 'hint');
+  const setRingerHint = hintSetter(ringerNode, 'ringer');
+
+  return { update, setSummary, setHint, setRingerHint, nodes, fields: FIELDS };
 }

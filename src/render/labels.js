@@ -78,20 +78,70 @@ export function gameOverSummary(state, { newHighScore = false } = {}) {
     + (newHighScore ? ' A new best score.' : '');
 }
 
+// The part of the instruction that is true on every device the page loads on:
+// a keyboard, and a drag on the play surface. The swipe is wired to pointer
+// events rather than touch events, so a mouse drag is the same gesture.
+const IDLE_ALWAYS = 'Press an arrow key or W, A, S or D to start '
+  + '— or swipe the board';
+
 /**
  * How to leave the idle board, in one line.
  *
  * Written here rather than only in index.html because it is said twice — as
  * text on the page and inside the canvas aria-label for the idle phase — and
- * two copies of a sentence drift. index.html carries the identical string and
+ * two copies of a sentence drift. index.html carries this exact string and
  * tests/markup.test.js pins them together.
  *
- * It names all three ways in, because the page has all three and which one is
- * available is not something the page can know: a keyboard, a swipe, and the
- * on-screen buttons that appear on a coarse pointer.
+ * THIS SENTENCE USED TO NAME THE ARROW BUTTONS UNCONDITIONALLY, AND THAT WAS
+ * WRONG. The d-pad is displayed only under `@media (pointer: coarse)`, so a
+ * visitor on a desktop was told to use a control that is not on their screen —
+ * an instruction that sends the reader looking for something that is not
+ * there, which is worse than one that leaves a control unmentioned. Worse
+ * again for a screen reader user, who was told about buttons that were
+ * `display: none` and therefore not in the accessibility tree either.
+ *
+ * So the sentence has two forms and `idleInstructionFor` picks between them
+ * against the same media query the stylesheet uses. This is the default one,
+ * naming only what every visitor has; it is also the copy in the markup,
+ * because the markup is parsed before any script has run and can therefore
+ * only be the form that is true everywhere.
  */
-export const IDLE_INSTRUCTION = 'Press an arrow key or W, A, S or D to start '
-  + '— or swipe the board, or use the arrow buttons.';
+export const IDLE_INSTRUCTION = `${IDLE_ALWAYS}.`;
+
+/** The same sentence where the d-pad is actually on screen. */
+export const IDLE_INSTRUCTION_WITH_DPAD = `${IDLE_ALWAYS}, or use the arrow buttons.`;
+
+/**
+ * The instruction for a page that is, or is not, showing the d-pad.
+ *
+ * `dpadVisible` comes from `matchMedia(DPAD_MEDIA_QUERY)` in main.js, which is
+ * the string src/ui/dpad.js exports and index.html's stylesheet uses. One
+ * query, named once, so the sentence and the CSS cannot come to disagree about
+ * whether the buttons are there.
+ */
+export function idleInstructionFor({ dpadVisible = false } = {}) {
+  return dpadVisible ? IDLE_INSTRUCTION_WITH_DPAD : IDLE_INSTRUCTION;
+}
+
+/**
+ * The one honest line about iOS and the hardware ringer switch.
+ *
+ * On iOS, Web Audio plays on the ambient channel, which the ringer switch
+ * silences while an `<audio>` element is unaffected.
+ * `navigator.audioSession` is the API that moves it off that channel, and
+ * where the browser does not have it there is nothing this code can do.
+ *
+ * So it says so. It does not say "enable sound" as though the player had
+ * missed a setting, and it does not claim the case is handled. It is worded to
+ * be true on a desktop browser as well — which also lacks the API, and has no
+ * ringer switch — by naming the platform the problem belongs to rather than
+ * asserting the reader is on it.
+ */
+export function ringerHint(needed) {
+  if (!needed) return null;
+  return 'On iOS, the hardware ringer switch may silence this game: this '
+    + 'browser gives no way to opt out of it.';
+}
 
 /** The one honest line about a save that this session must not write over. */
 export function nonWritableHint(writable) {
@@ -133,7 +183,10 @@ export function ariaLabelFor(state, context = {}) {
     case 'won':
       return `Coil board, ${board}. Board filled; you win.`;
     case 'idle':
-      return `Coil board, ${board}. Ready to play. ${IDLE_INSTRUCTION} `
+      // The same sentence the page is showing, chosen against the same media
+      // query. A label that named the d-pad while the page did not — or the
+      // other way about — would be two descriptions of one board.
+      return `Coil board, ${board}. Ready to play. ${idleInstructionFor(context)} `
         + 'Score, space and multiplier are in the readout beside the board.';
     case 'paused':
       return `Coil board, ${board}. Paused. Score and space are in the readout beside the board.`;
@@ -177,6 +230,19 @@ export function createAriaLabeller() {
       label = ariaLabelFor(state, context);
       writes++;
       return { label, changed: true };
+    },
+
+    /**
+     * Forget the current phase, so the next `update` writes again.
+     *
+     * For the one thing that changes the sentence without changing the phase:
+     * the d-pad appearing or disappearing under the pointer media query, which
+     * happens on a hybrid laptop when a finger touches the screen. Without
+     * this the page text would swap and the aria-label would not, which is the
+     * drift the single source was there to prevent.
+     */
+    invalidate() {
+      phase = null;
     },
   };
 }

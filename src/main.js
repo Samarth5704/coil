@@ -17,6 +17,11 @@
 // finished until the restart button is pressed, because the game-over summary
 // is where the ramp step is named and a board that takes itself away takes the
 // summary with it.
+//
+// Phase 7 gives it sound, and adds two globals to the list this file is the
+// only holder of: `AudioContext` and `navigator.audioSession`. Both are handed
+// to src/audio/synth.js as arguments, which is what lets a test spy on the
+// constructor and assert that nothing built one before the player acted.
 
 import { createStore } from './store.js';
 import { load } from './persist.js';
@@ -24,14 +29,17 @@ import { createSession } from './session.js';
 import { createLoop } from './loop.js';
 import { createRenderer, readPalette, drawOptionsFor } from './render/canvas.js';
 import {
-  readoutStrings, gameOverSummary, nonWritableHint, createAriaLabeller,
+  readoutStrings, gameOverSummary, nonWritableHint, ringerHint,
+  idleInstructionFor, createAriaLabeller,
 } from './render/labels.js';
 import { createReadout } from './ui/readout.js';
 import { createGameOver } from './ui/gameover.js';
 import { createIdleNote } from './ui/idle.js';
-import { createDpad } from './ui/dpad.js';
+import { createDpad, DPAD_MEDIA_QUERY } from './ui/dpad.js';
 import { createSettings } from './ui/settings.js';
 import { resolveSwipe } from './input/swipe.js';
+import { createAudio } from './audio/synth.js';
+import { createCues } from './audio/cues.js';
 
 const COLS = 24;
 const ROWS = 18;
@@ -66,14 +74,76 @@ createSettings({ root: panel, store });
 
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
+// The same query index.html's stylesheet uses to show the d-pad, matched here
+// so the idle instruction can name the arrow buttons only where they exist.
+// One string, exported from src/ui/dpad.js and pinned to the CSS by
+// tests/markup.test.js: a sentence telling the player to press a button that
+// is display:none sends them looking for something that is not there.
+const dpadQuery = window.matchMedia(DPAD_MEDIA_QUERY);
+
 let focused = false;
+
+// THE AUDIO IS BUILT HERE AND STARTED NOWHERE. `createAudio` constructs no
+// AudioContext — it holds the constructor and waits for `unlock()`, which is
+// called from inside a real gesture handler and from nowhere else. This is the
+// only place `AudioContext` and `navigator.audioSession` are named.
+//
+// The board starting idle is what guarantees a gesture exists to build it on:
+// the player has to steer to begin, so there is always a real press behind the
+// first sound. A context created outside a gesture is handed back suspended
+// and stays that way for the life of the page.
+//
+// `platform` is the feature probe the ringer hint is gated on, read here
+// because this is the only file allowed to touch `navigator` and `window`.
+// Three values, no user-agent string: whether the device reports touch points,
+// whether the non-standard `GestureEvent` interface exists, and whether the
+// mobile-WebKit-only `-webkit-touch-callout` property is supported.
+// `plausiblyIosAudio` in src/audio/synth.js says what that can and cannot
+// distinguish, and defaults to no.
+const audio = createAudio({
+  Context: window.AudioContext || window.webkitAudioContext || null,
+  audioSession: window.navigator.audioSession ?? null,
+  platform: {
+    maxTouchPoints: window.navigator.maxTouchPoints || 0,
+    hasGestureEvent: typeof window.GestureEvent !== 'undefined',
+    supportsTouchCallout: typeof window.CSS?.supports === 'function'
+      && window.CSS.supports('-webkit-touch-callout', 'none'),
+  },
+});
+
+// The second honest line, and it is the same treatment as the unwritable save:
+// where the ringer switch can silence the game and nothing here can stop it,
+// say so rather than claiming otherwise. Gated on the platform AND on sound
+// being on, so it is not shown to a desktop that has no such switch, and re-
+// read on every store change because the second of those can be toggled.
+function syncRingerHint() {
+  readout.setRingerHint(ringerHint(audio.needsRingerHint));
+}
+
+const cues = createCues({ audio });
+
+// Every gesture that can be the first one. `unlock()` is idempotent and cheap
+// after the first call — it resumes a suspended context and otherwise returns
+// the one it has — so it is safe to hang off all of them, and it MUST be all
+// of them: whichever the player reaches for first has to be the one that
+// starts the audio, or the first sound of the session is missing.
+function firstGesture() {
+  if (store.getState().soundOn) audio.unlock();
+}
 
 // The line that says how to start, shown while the board is idle. The board no
 // longer runs on load: it draws its starting position and waits, because a
 // board that starts live is over eleven ticks later, and the end of a run
 // moves focus — which, with no user action behind it, is the page grabbing the
 // player rather than answering them.
-const idleNote = createIdleNote({ root: panel });
+//
+// The sentence is asked for on every show rather than read out of the markup,
+// because whether the d-pad is on screen is a media query and a media query
+// can change without the page reloading.
+const idleNote = createIdleNote({
+  root: panel,
+  instruction: () => idleInstructionFor({ dpadVisible: dpadQuery.matches }),
+});
 
 // The game-over region owns the button and where focus goes; the readout owns
 // the summary node, as it owns every node it writes, and is handed the string
@@ -101,8 +171,16 @@ const session = createSession({
       idleNote.hide();
       syncViews();
     },
+    // The sounds. They hang off the session rather than off the event
+    // handlers because they are about what the BOARD did, not about what was
+    // pressed: a turn the queue refused makes no sound, and a tick that ended
+    // the run is reported by `ended` alone, so a pulse does not play
+    // underneath its own death cue.
+    ticked: cues.ticked,
+    turned: cues.turned,
     ended: (state, { newHighScore }) => {
       syncViews();
+      cues.ended(state, { newHighScore });
       // The summary carries the ramp step BY NAME, and says so in words when
       // the run was a new best. Neither is information a screen reader ever
       // had from the colour on the board.
@@ -112,6 +190,10 @@ const session = createSession({
     // it. Focus moves to the play surface here — a response to the button the
     // player just pressed, not a move the app made on its own.
     restarted: () => {
+      // The death cue and its fanfare belong to the run that ended. A new
+      // board arriving under the tail of the old board's sound is the same
+      // mistake as a game-over summary left on screen.
+      audio.stop();
       gameOver.hide();
       idleNote.show();
       syncViews();
@@ -128,6 +210,7 @@ const session = createSession({
 // Neither path focuses the canvas: a thumb on the d-pad wants the next press
 // to land on the d-pad.
 function steer(direction) {
+  firstGesture();
   session.steer(direction);
   render();
 }
@@ -163,6 +246,7 @@ function syncViews() {
   const update = labeller.update(state, {
     paused: loop.isPaused(),
     idle: session.lifecycle === 'idle',
+    dpadVisible: dpadQuery.matches,
   });
   // The label is written to the canvas exactly when the labeller says it
   // changed: at the start, at a pause, at a death and at the win. Never per
@@ -188,7 +272,13 @@ const loop = createLoop({
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (loop.setPaused(document.visibilityState === 'hidden')) syncViews();
+  const hidden = document.visibilityState === 'hidden';
+  // Nothing is SCHEDULED while the tab is hidden, and what is already
+  // scheduled is stopped. A hidden tab that keeps queueing notes comes back
+  // with a backlog of them to play at once, which is the audio version of the
+  // three hundred ticks the frame clamp exists to prevent.
+  audio.setHidden(hidden);
+  if (loop.setPaused(hidden)) syncViews();
 });
 
 // One keydown listener, on the document, and the ONLY preventDefault in the
@@ -197,6 +287,10 @@ document.addEventListener('visibilitychange', () => {
 // all — so Tab is never taken, a key pressed inside the settings panel is
 // never taken, and a key pressed after the run has ended is never taken.
 document.addEventListener('keydown', (event) => {
+  // Unlocked before the key is applied, so the context exists by the time the
+  // turn this press queues makes a sound. Still inside the gesture: this is
+  // the handler the browser dispatched, not a callback out of it.
+  firstGesture();
   const action = session.applyKey(event, { surfaceFocused: focused });
   if (action.preventDefault) event.preventDefault();
 });
@@ -211,6 +305,10 @@ canvas.addEventListener('blur', () => { focused = false; });
 let gestureStart = null;
 
 canvas.addEventListener('pointerdown', (event) => {
+  // The gesture is the press, not the swipe it may turn into. A pointerdown
+  // that resolves to no direction still counts as the user action the autoplay
+  // policy is asking for.
+  firstGesture();
   gestureStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
 });
 
@@ -241,6 +339,33 @@ function watchPixelRatio() {
   }, { once: true });
 }
 watchPixelRatio();
+
+// Sound follows the persisted setting, in both directions and immediately.
+// Switching it OFF silences what is already sounding rather than waiting for
+// the current note: the death cue is 600 ms and is exactly the sound a player
+// reaches for the toggle during. Switching it ON is itself a gesture — the
+// change event came from a real click or key — so it is a valid moment to
+// build the context, which is why a player who arrives with sound off is not
+// stuck with silence for the rest of the session.
+store.subscribe((record) => {
+  audio.setEnabled(record.soundOn);
+  if (record.soundOn) audio.unlock();
+  // Sound off means nothing for a ringer switch to silence, so the line goes
+  // with it and comes back with it.
+  syncRingerHint();
+});
+audio.setEnabled(store.getState().soundOn);
+syncRingerHint();
+
+// A hybrid laptop gains a coarse pointer the moment a finger touches the
+// screen, and the d-pad appears with it. The board is still idle, so nothing
+// about the phase changed and the labeller would otherwise keep the sentence
+// it was born with while the page under it swapped.
+dpadQuery.addEventListener('change', () => {
+  if (session.lifecycle === 'idle') idleNote.show();
+  labeller.invalidate();
+  syncViews();
+});
 
 store.subscribe(syncViews);
 
