@@ -3,6 +3,10 @@ node_modules/
 *.log
 .vitest/
 
+# The publish tree tools/publish.mjs writes with `npm run publish`. Built, not
+# content; Pages deploys it from the workflow, never from the repo.
+dist/
+
 # Agent/editor state that is per-machine. .claude/launch.json is NOT ignored:
 # it is the one repo-specific answer to "how do I run this", and a project with
 # no build step has nowhere else to put it.
