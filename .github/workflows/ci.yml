@@ -1,0 +1,37 @@
+# Coil — CI. Five gates; every one of them fails the build.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Syntax — node --check on every .js and .mjs in src/ tools/ tests/
+        run: |
+          set -euo pipefail
+          find src tools tests \( -name '*.js' -o -name '*.mjs' \) -type f -print0 \
+            | xargs -0 -n1 node --check
+
+      - name: Tests
+        run: npm test
+
+      - name: Contrast gate
+        run: npm run contrast
+
+      - name: Constraint gate
+        run: node tools/check-constraints.mjs
+
+      - name: Publish allowlist
+        run: node tools/publish.mjs --out /tmp/dist-check

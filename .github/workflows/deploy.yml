@@ -1,0 +1,52 @@
+# Coil — GitHub Pages, via Actions. The Pages source for the repository must be
+# set to "GitHub Actions", never "Deploy from a branch": nothing in the repo is
+# a publishable tree until tools/publish.mjs has classified every top-level
+# entry and copied the PUBLISH set out.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. A second push while one is in flight waits for it
+# rather than racing it; an in-flight deploy is never cancelled part-way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the publish tree through the allowlist
+        run: node tools/publish.mjs --out dist
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

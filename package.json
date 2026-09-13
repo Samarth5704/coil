@@ -7,7 +7,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "contrast": "node tools/contrast.mjs"
+    "contrast": "node tools/contrast.mjs",
+    "constraints": "node tools/check-constraints.mjs",
+    "publish": "node tools/publish.mjs --out dist"
   },
   "devDependencies": {
     "vitest": "^3.2.4"
