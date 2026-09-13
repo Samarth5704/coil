@@ -243,6 +243,51 @@ describe('7. no .mp3, .wav or .ogg anywhere in the repo', () => {
   });
 });
 
+describe('KNOWN GAP — dynamic property access is not caught, because strings are blanked', () => {
+  // These cases document a limit of the scrubber, not a behaviour to keep.
+  // The identifier checks assume identifiers are written literally; a name
+  // reached through a string evades them. If a future change closes the gap,
+  // these assertions flip and the header comment in the tool comes out with
+  // them.
+
+  it("globalThis['localStorage'] outside main.js PASSES the window-only-in-main check", () => {
+    // `globalThis` is not on check 6's list, and the 'localStorage' behind
+    // the string is blanked, so this reaches storage with no finding at all.
+    const findings = checkWindowOnlyInMain(
+      tree({ 'src/persist.js': "const s = globalThis['localStorage'];" + '\n' }),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("window['localStorage'] outside main.js is caught for `window` only — the property is invisible", () => {
+    const findings = checkWindowOnlyInMain(
+      tree({ 'src/persist.js': "const s = window['localStorage'];" + '\n' }),
+    );
+    expect(findings.map((f) => f.message)).toEqual(['window is named only in src/main.js; pass it in']);
+  });
+
+  it("globalThis['document'] in src/core/ PASSES the core-globals check", () => {
+    // `globalThis` itself is literal here, so that one is caught; the
+    // 'document' behind the string is not. Both facts, pinned.
+    const findings = checkCoreGlobals(tree({ 'src/core/a.js': "const d = globalThis['document'];\n" }));
+    expect(findings.map((f) => f.message)).toEqual(['src/core/ must not reference globalThis']);
+  });
+
+  it("el['inner' + 'HTML'] PASSES the innerHTML check even though strings are kept for it", () => {
+    // Strings are kept for this check, but the name is split across two of
+    // them; there is no token `innerHTML` to find.
+    expect(checkInnerHtml(tree({ 'src/ui/a.js': "el['inner' + 'HTML'] = '';\n" }))).toEqual([]);
+  });
+
+  it('the same access written literally IS caught, so the gap is the string and nothing else', () => {
+    const findings = checkWindowOnlyInMain(tree({ 'src/persist.js': 'const s = window.localStorage;\n' }));
+    expect(findings.map((f) => f.message)).toEqual([
+      'window is named only in src/main.js; pass it in',
+      'localStorage is named only in src/main.js; pass it in',
+    ]);
+  });
+});
+
 describe('the gate as a whole', () => {
   it('runs all seven checks', () => {
     expect(CHECKS).toHaveLength(7);

@@ -23,8 +23,19 @@
  * very things those checks exist to catch. Blanking keeps newlines, so a line
  * number reported here is a line number in the file.
  *
- * Known limit of the scrubber, named so it is not mistaken for coverage: a
- * regular-expression literal containing a quote or a slash-slash is read as
+ * Two known limits, named so they are not mistaken for coverage.
+ *
+ * The identifier checks assume identifiers are written literally. Blanking
+ * string literals means a name reached through dynamic property access is
+ * not seen: `globalThis['localStorage']` passes check 6 outright,
+ * `globalThis['document']` passes check 2 for the `document` half (only the
+ * literal `globalThis` is reported), and `el['inner' + 'HTML']` passes
+ * check 3 because no token `innerHTML` exists to find. This gate catches
+ * the honest mistake — a global reached for out of habit — not code written
+ * to get past it; `tests/constraints.test.js` pins the gap as a fact rather
+ * than a promise.
+ *
+ * A regular-expression literal containing a quote or a slash-slash is read as
  * the start of a string or comment. No such literal exists in src/ today.
  *
  * Every check takes a tree it is handed rather than reading the disk itself,

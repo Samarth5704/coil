@@ -233,6 +233,15 @@ describe('the lists themselves', () => {
     }
   });
 
+  it('carry README.md, LICENSE, .git/ and dist/ as explicit EXCLUDE entries, not as code', () => {
+    // Each of these could have been skipped by a special case in the walker.
+    // None is: the rule "everything at the top level is on a list" has no
+    // exception hidden in code, and the --out path is the only identity skip.
+    for (const form of ['README.md', 'LICENSE', '.git/', 'dist/']) {
+      expect(EXCLUDE).toContain(form);
+    }
+  });
+
   it('share no entry, so nothing can be both published and excluded', () => {
     for (const form of PUBLISH) expect(EXCLUDE).not.toContain(form);
   });
